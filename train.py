@@ -282,6 +282,7 @@ class Trainer:
             num_workers=data_config['num_workers'],
             pin_memory=False,
             persistent_workers=False,
+            prefetch_factor=1,
             drop_last=True,
         )
 
@@ -293,6 +294,7 @@ class Trainer:
             num_workers=data_config['num_workers'],
             pin_memory=False,
             persistent_workers=False,
+            prefetch_factor=1,
             drop_last=True,
         )
         
