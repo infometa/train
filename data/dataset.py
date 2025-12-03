@@ -193,8 +193,8 @@ class TimbreRestoreDataset(Dataset):
         
         # 数据增强
         if self.augment:
-            # 温和增益，避免破坏动态（约 ±0.5dB）
-            gain = random.uniform(0.95, 1.05)
+            # 温和增益（约 ±1dB）
+            gain = random.uniform(0.9, 1.1)
             degraded = degraded * gain
             clean = clean * gain
         

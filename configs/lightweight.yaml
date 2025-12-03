@@ -1,0 +1,90 @@
+# ===========================================
+# 轻量化配置 - CPU 实时推理优化
+# 目标: RTF < 0.5 @ 40ms帧
+# ===========================================
+
+data:
+  vctk_path: "/data/audio/vctk/wav48_silence_trimmed"
+  aishell3_path: "/data/audio/Aishell3/train/wav"
+  ir_path: "/data/audio/impulse_responses/SLR26/simulated_rirs_48k"
+  noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
+  output_dir: "/workspace/train_data_lite"
+
+  sample_rate: 48000
+  segment_length: 48000       # 1 秒训练段
+  save_segment_length: 48000  # 保存 1 秒，避免丢短音频
+  segment_hop: 24000          # 0.5 秒步长
+  snr_range: [5, 30]
+  noise_prob: 0.9
+  ir_prob: 0.7
+
+  dataset_ratio:
+    vctk: 0.3
+    aishell3: 0.7
+
+  val_ratio: 0.05
+  align_df_delay: true
+  align_max_shift: 240
+  align_sample_count: 32
+  num_workers: 24
+
+model:
+  name: "CausalUNetGAN_Lite"
+  generator:
+    in_channels: 1
+    out_channels: 1
+    channels: [32, 64, 128, 256]
+    kernel_size: 5
+    bottleneck_type: "gru"
+    bottleneck_layers: 1
+    use_weight_norm: true
+  discriminator:
+    scales: 2
+    channels: [32, 64, 128, 256, 512]
+    kernel_size: 5
+    use_spectral_norm: true
+
+training:
+  batch_size: 32
+  epochs: 80
+  optimizer:
+    type: "AdamW"
+    lr_g: 2.0e-4
+    lr_d: 2.0e-4
+    betas: [0.8, 0.99]
+    weight_decay: 0.01
+  scheduler:
+    type: "CosineAnnealingLR"
+    T_max: 80
+    eta_min: 1.0e-6
+    warmup_epochs: 3
+  loss_weights:
+    l1: 5.0
+    multi_stft: 5.0
+    adversarial: 1.0
+    feature_matching: 2.0
+  stft_config:
+    fft_sizes: [512, 1024, 2048]
+    hop_sizes: [128, 256, 512]
+    win_lengths: [512, 1024, 2048]
+    sample_rate: 48000
+    hf_weight: 2.0
+    hf_cutoff: 3000
+  gan_start_epoch: 5
+  grad_clip: 1.0
+  save_every: 5
+  log_every: 500
+
+inference:
+  onnx_opset: 17
+  simplify: true
+  frame_size: 480
+
+distributed:
+  enabled: true
+  backend: "nccl"
+
+logging:
+  tensorboard: true
+  wandb: false
+  project_name: "timbre_restore_lite"

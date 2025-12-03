@@ -24,7 +24,7 @@ data:
   
   # 训练数据配置
   segment_length: 48000  # 1秒（训练裁剪长度）
-  save_segment_length: 72000  # 数据生成时保存长度（约 1.5 秒），训练再随机裁剪
+  save_segment_length: 48000  # 保存 1秒片段，避免丢弃短音频，提升样本量
   segment_hop: 24000     # 生成阶段多片段切分步长（0.5秒）
   snr_range: [5, 30]     # 信噪比范围 (dB)，覆盖低 SNR
   noise_prob: 0.9        # 加噪概率，保留少量纯净样本

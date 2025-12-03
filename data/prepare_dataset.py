@@ -27,6 +27,7 @@ warnings.filterwarnings("ignore")
 import numpy as np
 import soundfile as sf
 import librosa
+import soxr
 from scipy import signal
 from tqdm import tqdm
 import yaml
@@ -67,7 +68,7 @@ def load_audio_file(path: Path, target_sr: int = 48000) -> Tuple[np.ndarray, int
     
     # 重采样
     if sr != target_sr:
-        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+        audio = soxr.resample(audio, sr, target_sr, quality="HQ")
     
     return audio.astype(np.float32), target_sr
 
@@ -93,7 +94,7 @@ def load_noise_file(path: str, target_sr: int = 48000) -> np.ndarray:
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
     if sr != target_sr:
-        audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
+        audio = soxr.resample(audio, sr, target_sr, quality="HQ")
     return audio.astype(np.float32)
 
 
@@ -115,8 +116,7 @@ def load_ir_files(ir_dir: str, target_sr: int = 48000) -> List[np.ndarray]:
         if ir.ndim > 1:
             ir = ir.mean(axis=1)
         if sr != target_sr:
-            ir = librosa.resample(ir, orig_sr=sr, target_sr=target_sr)
-        # 归一化 IR
+            ir = soxr.resample(ir, sr, target_sr, quality="HQ")
         ir = ir / (np.abs(ir).max() + 1e-8)
         irs.append(ir.astype(np.float32))
     return irs
