@@ -26,16 +26,17 @@ data:
   segment_length: 48000  # 1秒（训练裁剪长度）
   save_segment_length: 240000  # 数据生成时保存长度（约 5 秒），训练再随机裁剪
   segment_hop: 24000     # 生成阶段多片段切分步长（0.5秒）
-  snr_range: [0, 30]     # 信噪比范围 (dB)，覆盖低 SNR
+  snr_range: [5, 30]     # 信噪比范围 (dB)，覆盖低 SNR
+  noise_prob: 0.9        # 加噪概率，保留少量纯净样本
   ir_prob: 0.7           # 添加混响的概率
   
   # 数据集比例
   dataset_ratio:
-    vctk: 0.5            # 英文 50%
-    aishell3: 0.5        # 中文 50%
+    vctk: 0.3            # 英文
+    aishell3: 0.7        # 中文
   
   # 数据划分
-  val_ratio: 0.02
+  val_ratio: 0.05
 
   # DF 引入的潜在延迟对齐（样本级，全局估计）
   align_df_delay: true
@@ -43,7 +44,7 @@ data:
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader
-  num_workers: 8
+  num_workers: 16
 
 # 模型配置
 model:
@@ -68,14 +69,14 @@ model:
 
 # 训练配置
 training:
-  batch_size: 16
+  batch_size: 24
   epochs: 60
   
   # 优化器
   optimizer:
     type: "AdamW"
-    lr_g: 1.0e-4
-    lr_d: 1.0e-4
+    lr_g: 1.5e-4
+    lr_d: 1.5e-4
     betas: [0.8, 0.99]
     weight_decay: 0.01
   
@@ -108,7 +109,7 @@ training:
   
   # 检查点
   save_every: 3
-  log_every: 200
+  log_every: 400
 
 # 推理配置
 inference:
@@ -122,7 +123,7 @@ inference:
 
 # 分布式训练
 distributed:
-  enabled: false
+  enabled: true
   backend: "nccl"
 
 # 日志

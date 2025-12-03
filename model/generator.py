@@ -77,8 +77,8 @@ class CausalConvTranspose1d(nn.Module):
         self.stride = stride
         self.kernel_size = kernel_size
         
-        # 计算需要裁剪的量
-        self.trim = kernel_size - stride
+        # 计算需要裁剪的量，防止负值
+        self.trim = max(0, kernel_size - stride)
         
         self.conv = nn.ConvTranspose1d(
             in_channels,
@@ -387,8 +387,9 @@ class CausalUNetGenerator(nn.Module):
         # 输出 = 原始输入 + 学习到的残差
         # 模型只需要学习 (clean - degraded)，任务更简单
         x = residual + self.residual_scale * x
-        # 使用 tanh 软约束，避免梯度饱和
-        x = torch.tanh(x)
+        # 训练阶段不强制裁剪，推理阶段保护性 clamp
+        if not self.training:
+            x = torch.clamp(x, -1.0, 1.0)
         # =========================================
         
         if return_state:

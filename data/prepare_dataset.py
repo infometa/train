@@ -167,6 +167,7 @@ def process_single_file(
         segment_hop = max(1, config.get('segment_hop', save_segment_length // 2))
         snr_range = config['snr_range']
         ir_prob = config['ir_prob']
+        noise_prob = config.get('noise_prob', 1.0)
         
         # 加载干净音频
         clean, sr = load_audio_file(clean_path, target_sr)
@@ -199,12 +200,15 @@ def process_single_file(
                 degraded = add_reverb(degraded, ir)
             
             # 随机添加噪声（按需加载）
-            snr = random.uniform(snr_range[0], snr_range[1])
-            if len(noise) == 0:
-                raise RuntimeError("噪声列表为空")
-            noise_path = random.choice(noise)
-            noise_arr = load_noise_file(str(noise_path), target_sr)
-            degraded = add_noise(degraded, noise_arr, snr)
+            if random.random() < noise_prob:
+                snr = random.uniform(snr_range[0], snr_range[1])
+                if len(noise) == 0:
+                    raise RuntimeError("噪声列表为空")
+                noise_path = random.choice(noise)
+                noise_arr = load_noise_file(str(noise_path), target_sr)
+                degraded = add_noise(degraded, noise_arr, snr)
+            else:
+                snr = None
             
             # 文件名
             file_id = f"{idx:08d}_{seg_idx:02d}"
