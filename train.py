@@ -284,7 +284,7 @@ class Trainer:
             pin_memory=torch.cuda.is_available(),
             drop_last=True,
         )
-        
+
         self.val_loader = DataLoader(
             val_dataset,
             batch_size=train_config['batch_size'],

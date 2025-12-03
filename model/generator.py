@@ -387,8 +387,8 @@ class CausalUNetGenerator(nn.Module):
         # 输出 = 原始输入 + 学习到的残差
         # 模型只需要学习 (clean - degraded)，任务更简单
         x = residual + self.residual_scale * x
-        # 软约束，防止过大振幅，保持可导
-        x = torch.tanh(x * 0.5) * 2.0
+        # 温和软限制，保持大部分线性区域，同时抑制过大振幅
+        x = x / (1.0 + 0.1 * torch.abs(x))
         if not self.training:
             x = torch.clamp(x, -1.0, 1.0)
         # =========================================

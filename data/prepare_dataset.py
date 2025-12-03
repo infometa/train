@@ -242,11 +242,11 @@ def run_deepfilter_batch(
     input_dir: Path,
     output_dir: Path,
     batch_size: int = 100
-) -> None:
+) -> List[str]:
     """批量运行 DeepFilterNet"""
     if not DF_AVAILABLE:
         print("DeepFilterNet not available, skipping...")
-        return
+        return []
     
     print("Initializing DeepFilterNet...")
     model, df_state, _ = init_df()
@@ -255,6 +255,7 @@ def run_deepfilter_batch(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     print(f"Processing {len(input_files)} files with DeepFilterNet...")
+    failed: List[str] = []
     
     for i, input_path in enumerate(tqdm(input_files)):
         output_path = output_dir / input_path.name
@@ -268,20 +269,9 @@ def run_deepfilter_batch(
             save_audio(str(output_path), enhanced, sr)
         except Exception as e:
             print(f"Error processing {input_path}: {e}")
-            # 复制原文件作为 fallback
-            try:
-                if audio is None:
-                    # 回退读取为 numpy
-                    audio_np, _ = load_audio_file(input_path, sr)
-                else:
-                    # 转 numpy 并调整为 (T, C)
-                    audio_np = audio.detach().cpu().numpy() if hasattr(audio, "detach") else np.asarray(audio)
-                    if audio_np.ndim == 2 and audio_np.shape[0] < audio_np.shape[1]:
-                        audio_np = audio_np.T
-                sf.write(output_path, audio_np, sr)
-            except Exception as e2:
-                print(f"Fallback save failed for {input_path}: {e2}; copying original.")
-                output_path.write_bytes(input_path.read_bytes())
+            failed.append(input_path.name)
+            continue
+    return failed
 
 
 def main():
@@ -424,9 +414,10 @@ def main():
     
     print(f"Generated {len(results)} samples")
     
+    failed_df: List[str] = []
     # 运行 DeepFilterNet
     if not args.skip_df:
-        run_deepfilter_batch(noisy_dir, degraded_dir)
+        failed_df = run_deepfilter_batch(noisy_dir, degraded_dir)
     else:
         print("Skipping DeepFilterNet processing (--skip_df)")
         # 复制 noisy 到 degraded（调试用）
@@ -435,8 +426,17 @@ def main():
             shutil.copy(f, degraded_dir / f.name)
     
     # 更新 results 中的 degraded 路径
+    filtered = []
     for r in results:
-        r['degraded'] = str(degraded_dir / Path(r['degraded']).name)
+        name = Path(r['degraded']).name
+        if name in failed_df:
+            continue
+        degraded_path = degraded_dir / name
+        if not degraded_path.exists():
+            continue
+        r['degraded'] = str(degraded_path)
+        filtered.append(r)
+    results = filtered
     
     # 划分训练/验证集
     random.shuffle(results)
