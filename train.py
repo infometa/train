@@ -93,9 +93,8 @@ class Trainer:
         self._build_losses()
         
         # 混合精度
-        device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.scaler_g = GradScaler(device_type=device_type)
-        self.scaler_d = GradScaler(device_type=device_type)
+        self.scaler_g = GradScaler()
+        self.scaler_d = GradScaler()
         
         # 日志
         if self.is_main:
