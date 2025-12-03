@@ -1,0 +1,131 @@
+# DeepFilterGAN 音色修复模型配置
+# 基于 Stochastic Regeneration 框架
+# 
+# 核心改进：
+# 1. 残差学习设计：模型学习 (clean - degraded) 的差异
+# 2. 高频加权 STFT Loss：强调高频恢复
+# 3. 调整损失权重：降低 L1，提高 STFT
+
+# 数据配置
+data:
+  # 干净语音数据集路径
+  vctk_path: "/data/audio/vctk/wav48_silence_trimmed"
+  aishell3_path: "/data/audio/Aishell3/train/wav"
+  
+  # 退化配置
+  ir_path: "/data/audio/impulse_responses/SLR26/simulated_rirs_48k"
+  noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
+  
+  # 输出路径
+  output_dir: "/workspace/train_data"
+  
+  # 采样率
+  sample_rate: 48000
+  
+  # 训练数据配置
+  segment_length: 48000  # 1秒
+  save_segment_length: 240000  # 数据生成时保存长度（约 5 秒），训练再随机裁剪
+  snr_range: [5, 25]     # 信噪比范围 (dB)
+  ir_prob: 0.7           # 添加混响的概率
+  
+  # 数据集比例
+  dataset_ratio:
+    vctk: 0.5            # 英文 50%
+    aishell3: 0.5        # 中文 50%
+  
+  # 数据划分
+  val_ratio: 0.02
+
+  # DF 引入的潜在延迟对齐（样本级，全局估计）
+  align_df_delay: true
+  align_max_shift: 240      # 最大估计偏移（样本），@48k 约 5ms
+  align_sample_count: 32    # 估计偏移时采样的样本对数量
+  
+  # DataLoader
+  num_workers: 8
+
+# 模型配置
+model:
+  name: "CausalUNetGAN"
+  
+  # Generator (U-Net)
+  generator:
+    in_channels: 1
+    out_channels: 1
+    channels: [64, 128, 256, 512]
+    kernel_size: 7
+    bottleneck_type: "gru"  # gru / lstm / none
+    bottleneck_layers: 2
+    use_weight_norm: true
+    
+  # Discriminator (Multi-Scale)
+  discriminator:
+    scales: 3
+    channels: [64, 128, 256, 512, 1024]
+    kernel_size: 5
+    use_spectral_norm: true
+
+# 训练配置
+training:
+  batch_size: 16
+  epochs: 60
+  
+  # 优化器
+  optimizer:
+    type: "AdamW"
+    lr_g: 1.0e-4
+    lr_d: 1.0e-4
+    betas: [0.8, 0.99]
+    weight_decay: 0.01
+  
+  # 学习率调度
+  scheduler:
+    type: "CosineAnnealingLR"
+    T_max: 60            # 等于 epochs
+    eta_min: 1.0e-6
+  
+  # ========== 核心修改：损失权重 ==========
+  loss_weights:
+    l1: 15.0             # 从 45 降到 15，减少保守性
+    multi_stft: 2.0      # 从 1 升到 2，增强频谱约束
+    adversarial: 1.0     # 保持不变
+    feature_matching: 2.0 # 保持不变
+  # ========================================
+  
+  # Multi-Resolution STFT Loss（带高频加权）
+  stft_config:
+    fft_sizes: [512, 1024, 2048]
+    hop_sizes: [128, 256, 512]
+    win_lengths: [512, 1024, 2048]
+    sample_rate: 48000
+    hf_weight: 2.0       # 高频加权倍数
+    hf_cutoff: 3000      # 高频起始频率 (Hz)
+  
+  # 训练策略
+  gan_start_epoch: 3     # 从 5 改为 3，更早启动 GAN
+  grad_clip: 1.0
+  
+  # 检查点
+  save_every: 3
+  log_every: 200
+
+# 推理配置
+inference:
+  # ONNX 导出
+  onnx_opset: 17
+  simplify: true
+  
+  # 实时推理
+  frame_size: 480  # 10ms @ 48kHz
+  lookahead: 0     # 因果，无前瞻
+
+# 分布式训练
+distributed:
+  enabled: false
+  backend: "nccl"
+
+# 日志
+logging:
+  tensorboard: true
+  wandb: false
+  project_name: "timbre_restore"
