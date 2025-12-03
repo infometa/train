@@ -26,7 +26,7 @@ data:
   align_df_delay: true
   align_max_shift: 240
   align_sample_count: 32
-  num_workers: 24
+  num_workers: 8
 
 model:
   name: "CausalUNetGAN_Lite"
