@@ -17,7 +17,7 @@ data:
   noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
   
   # 输出路径
-  output_dir: "/workspace/train_data"
+  output_dir: "/data/train_data_lite"
   
   # 采样率
   sample_rate: 48000
