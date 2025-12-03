@@ -12,7 +12,7 @@ import numpy as np
 import soundfile as sf
 import torch
 from torch.utils.data import Dataset, DataLoader
-import librosa
+import soxr
 
 
 class TimbreRestoreDataset(Dataset):
@@ -79,7 +79,7 @@ class TimbreRestoreDataset(Dataset):
         
         # 重采样
         if sr != self.sample_rate:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
+            audio = soxr.resample(audio, sr, self.sample_rate, quality="HQ")
 
         # 异常值处理与裁剪
         audio = np.nan_to_num(audio, nan=0.0, posinf=0.99, neginf=-0.99)

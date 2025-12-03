@@ -418,6 +418,7 @@ def main():
         'segment_hop': data_config.get('segment_hop', data_config.get('save_segment_length', data_config['segment_length']) // 2),
         'snr_range': data_config['snr_range'],
         'ir_prob': data_config['ir_prob'],
+        'noise_prob': data_config.get('noise_prob', 1.0),
     }
     
     tasks = [
