@@ -277,7 +277,7 @@ def run_deepfilter_batch(
 def main():
     parser = argparse.ArgumentParser(description="准备音色修复训练数据")
     parser.add_argument("--config", type=str, default="configs/default.yaml")
-    parser.add_argument("--num_workers", type=int, default=8)
+    parser.add_argument("--num_workers", type=int, default=24)
     parser.add_argument("--max_files", type=int, default=None, help="限制处理文件数（调试用）")
     parser.add_argument("--skip_df", action="store_true", help="跳过 DeepFilterNet 处理")
     args = parser.parse_args()
