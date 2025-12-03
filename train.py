@@ -281,7 +281,7 @@ class Trainer:
             sampler=train_sampler,
             num_workers=data_config['num_workers'],
             pin_memory=False,
-            persistent_workers=True,
+            persistent_workers=False,
             drop_last=True,
         )
 
@@ -292,7 +292,7 @@ class Trainer:
             sampler=None,  # 验证集不分片，确保所有进程（或主进程）看到完整验证集
             num_workers=data_config['num_workers'],
             pin_memory=False,
-            persistent_workers=True,
+            persistent_workers=False,
             drop_last=True,
         )
         

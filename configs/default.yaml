@@ -44,7 +44,7 @@ data:
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader
-  num_workers: 16
+  num_workers: 8
 
 # 模型配置
 model:
