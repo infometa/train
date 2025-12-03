@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Tuple, Optional
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
+from collections import OrderedDict
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -69,6 +70,21 @@ def load_audio_file(path: Path, target_sr: int = 48000) -> Tuple[np.ndarray, int
         audio = librosa.resample(audio, orig_sr=sr, target_sr=target_sr)
     
     return audio.astype(np.float32), target_sr
+
+# 简单缓存以减少重复加载/重采样开销（每个进程独立）
+_noise_cache: OrderedDict[str, np.ndarray] = OrderedDict()
+_ir_cache: OrderedDict[str, np.ndarray] = OrderedDict()
+
+def _get_cached(cache: OrderedDict, key: str, loader, cache_size: int = 64) -> np.ndarray:
+    if key in cache:
+        val = cache.pop(key)
+        cache[key] = val
+        return val.copy()
+    val = loader()
+    cache[key] = val
+    if len(cache) > cache_size:
+        cache.popitem(last=False)
+    return val.copy()
 
 
 def load_noise_file(path: str, target_sr: int = 48000) -> np.ndarray:
@@ -176,19 +192,26 @@ def process_single_file(
         # 加载干净音频
         clean, sr = load_audio_file(clean_path, target_sr)
         
-        # 跳过太短的音频
-        if len(clean) < save_segment_length:
-            return None
-        
-        # 多片段切分（滑窗）
-        max_start = len(clean) - save_segment_length
-        starts = list(range(0, max_start + 1, segment_hop))
-        if starts[-1] != max_start:
-            starts.append(max_start)
-        
+        total_len = len(clean)
         samples = []
+        # 根据长度决定切片策略
+        if total_len < segment_length:
+            pad_len = segment_length - total_len
+            clean = np.pad(clean, (0, pad_len), mode='constant')
+            starts = [0]
+            seg_len = segment_length
+        elif total_len <= save_segment_length:
+            starts = [0]
+            seg_len = total_len
+        else:
+            seg_len = save_segment_length
+            max_start = total_len - save_segment_length
+            starts = list(range(0, max_start + 1, segment_hop))
+            if starts[-1] != max_start:
+                starts.append(max_start)
+        
         for seg_idx, start in enumerate(starts):
-            clean_seg = clean[start:start + save_segment_length]
+            clean_seg = clean[start:start + seg_len]
             
             # 归一化
             clean_seg = clean_seg / (np.abs(clean_seg).max() + 1e-8) * 0.9
@@ -200,7 +223,11 @@ def process_single_file(
             add_ir = random.random() < ir_prob and len(irs) > 0
             if add_ir:
                 ir_path = random.choice(irs)
-                ir, _ = load_audio_file(ir_path, target_sr)
+                ir = _get_cached(
+                    _ir_cache,
+                    str(ir_path),
+                    lambda: load_audio_file(ir_path, target_sr)[0]
+                )
                 degraded = add_reverb(degraded, ir)
             
             # 随机添加噪声（按需加载）
@@ -209,7 +236,11 @@ def process_single_file(
                 if len(noise) == 0:
                     raise RuntimeError("噪声列表为空")
                 noise_path = random.choice(noise)
-                noise_arr = load_noise_file(str(noise_path), target_sr)
+                noise_arr = _get_cached(
+                    _noise_cache,
+                    str(noise_path),
+                    lambda: load_noise_file(str(noise_path), target_sr)
+                )
                 degraded = add_noise(degraded, noise_arr, snr)
             else:
                 snr = None
