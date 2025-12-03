@@ -107,9 +107,13 @@ def load_ir_files(ir_dir: str, target_sr: int = 48000) -> List[np.ndarray]:
 
 
 def add_reverb(audio: np.ndarray, ir: np.ndarray) -> np.ndarray:
-    """添加混响（卷积）"""
+    """添加混响（卷积），保持能量"""
     reverbed = signal.fftconvolve(audio, ir, mode='full')[:len(audio)]
-    # 归一化防止削波
+    # 能量归一化到原始 RMS
+    orig_rms = np.sqrt(np.mean(audio ** 2) + 1e-8)
+    rev_rms = np.sqrt(np.mean(reverbed ** 2) + 1e-8)
+    reverbed = reverbed * (orig_rms / rev_rms)
+    # 峰值保护
     max_val = np.abs(reverbed).max()
     if max_val > 0.99:
         reverbed = reverbed * 0.99 / max_val

@@ -80,6 +80,10 @@ class TimbreRestoreDataset(Dataset):
         # 重采样
         if sr != self.sample_rate:
             audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
+
+        # 异常值处理与裁剪
+        audio = np.nan_to_num(audio, nan=0.0, posinf=0.99, neginf=-0.99)
+        audio = np.clip(audio, -1.0, 1.0)
         
         return audio.astype(np.float32)
 
@@ -108,7 +112,10 @@ class TimbreRestoreDataset(Dataset):
                 d = degraded_ds[:len(degraded_ds) + lag]
             if len(c) == 0 or len(d) == 0:
                 continue
-            score = np.dot(c, d)
+            # 归一化互相关，更鲁棒
+            c_norm = c / (np.linalg.norm(c) + 1e-8)
+            d_norm = d / (np.linalg.norm(d) + 1e-8)
+            score = np.dot(c_norm, d_norm)
             if score > best_score:
                 best_score = score
                 best_lag = lag
@@ -186,15 +193,10 @@ class TimbreRestoreDataset(Dataset):
         
         # 数据增强
         if self.augment:
-            # 随机增益
-            gain = random.uniform(0.7, 1.3)
+            # 温和增益，避免破坏动态（约 ±0.5dB）
+            gain = random.uniform(0.95, 1.05)
             degraded = degraded * gain
             clean = clean * gain
-            
-            # 随机翻转（相位反转）
-            if random.random() < 0.5:
-                degraded = -degraded
-                clean = -clean
         
         # 转为 Tensor [1, T]
         degraded = torch.from_numpy(degraded).unsqueeze(0)

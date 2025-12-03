@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp import GradScaler, autocast
 from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -93,8 +93,9 @@ class Trainer:
         self._build_losses()
         
         # 混合精度
-        self.scaler_g = GradScaler()
-        self.scaler_d = GradScaler()
+        device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.scaler_g = GradScaler(device_type=device_type)
+        self.scaler_d = GradScaler(device_type=device_type)
         
         # 日志
         if self.is_main:
@@ -167,6 +168,7 @@ class Trainer:
         opt_config = self.config['training']['optimizer']
         sched_config = self.config['training']['scheduler']
         epochs = self.config['training']['epochs']
+        self.warmup_epochs = sched_config.get('warmup_epochs', 0)
         
         self.optimizer_g = optim.AdamW(
             self.generator.parameters(),
@@ -181,6 +183,8 @@ class Trainer:
             betas=tuple(opt_config['betas']),
             weight_decay=opt_config['weight_decay'],
         )
+        self.base_lr_g = opt_config['lr_g']
+        self.base_lr_d = opt_config['lr_d']
         
         # 学习率调度 - 支持 CosineAnnealingLR 和 CosineAnnealingWarmRestarts
         sched_type = sched_config.get('type', 'CosineAnnealingLR')
@@ -219,6 +223,8 @@ class Trainer:
                 eta_min=eta_min,
             )
             self.scheduler_step_per_epoch = False
+        # 若配置了 warmup，在 warmup 结束后再启用调度
+        self.enable_scheduler = self.warmup_epochs == 0
     
     def _build_dataloaders(self):
         """构建数据加载器"""
@@ -268,7 +274,6 @@ class Trainer:
             train_sampler = DistributedSampler(train_dataset, shuffle=True)
         else:
             train_sampler = None
-            val_sampler = None
         
         self.train_loader = DataLoader(
             train_dataset,
@@ -287,6 +292,7 @@ class Trainer:
             sampler=None,  # 验证集不分片，确保所有进程（或主进程）看到完整验证集
             num_workers=data_config['num_workers'],
             pin_memory=torch.cuda.is_available(),
+            drop_last=True,
         )
         
         if self.is_main:
@@ -372,7 +378,7 @@ class Trainer:
         if use_gan:
             self.optimizer_d.zero_grad()
             
-            with autocast(enabled=amp_enabled):
+            with autocast(device_type=self.device.type, enabled=amp_enabled):
                 # 生成假样本
                 with torch.no_grad():
                     fake = self.generator(degraded)
@@ -395,7 +401,7 @@ class Trainer:
         # ============ Generator ============
         self.optimizer_g.zero_grad()
         
-        with autocast(enabled=amp_enabled):
+        with autocast(device_type=self.device.type, enabled=amp_enabled):
             fake = self.generator(degraded)
             
             if use_gan:
@@ -507,6 +513,17 @@ class Trainer:
         for epoch in range(self.epoch, epochs):
             self.epoch = epoch
             
+            # 线性 warmup：按 epoch 设置当前 lr
+            if self.warmup_epochs > 0 and epoch < self.warmup_epochs:
+                warmup_scale = (epoch + 1) / self.warmup_epochs
+                for param_group in self.optimizer_g.param_groups:
+                    param_group['lr'] = self.base_lr_g * warmup_scale
+                for param_group in self.optimizer_d.param_groups:
+                    param_group['lr'] = self.base_lr_d * warmup_scale
+            else:
+                if not self.enable_scheduler:
+                    self.enable_scheduler = True
+            
             # 设置分布式采样器的 epoch
             if self.world_size > 1:
                 self.train_loader.sampler.set_epoch(epoch)
@@ -546,15 +563,17 @@ class Trainer:
                         })
                 
                 # CosineAnnealingWarmRestarts 按 step 更新
-                if not self.scheduler_step_per_epoch and num_batches > 0:
+            if not self.scheduler_step_per_epoch and num_batches > 0:
+                if self.enable_scheduler:
                     step_frac = epoch + batch_idx / num_batches
                     self.scheduler_g.step(step_frac)
                     self.scheduler_d.step(step_frac)
             
             # CosineAnnealingLR 按 epoch 更新
             if self.scheduler_step_per_epoch:
-                self.scheduler_g.step()
-                self.scheduler_d.step()
+                if self.enable_scheduler:
+                    self.scheduler_g.step()
+                    self.scheduler_d.step()
             
             # 验证
             if self.is_main:

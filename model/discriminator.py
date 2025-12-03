@@ -36,13 +36,16 @@ class DiscriminatorBlock(nn.Module):
         # 中间层
         in_ch = channels[0]
         for i, out_ch in enumerate(channels[1:]):
+            actual_groups = groups[i] if i < len(groups) else 1
+            if in_ch % actual_groups != 0 or out_ch % actual_groups != 0:
+                actual_groups = 1  # 回退，防止整除错误
             self.convs.append(
                 norm_fn(nn.Conv1d(
                     in_ch, out_ch,
                     kernel_size=kernel_size,
                     stride=stride,
                     padding=kernel_size // 2,
-                    groups=groups[i] if i < len(groups) else 1
+                    groups=actual_groups
                 ))
             )
             in_ch = out_ch

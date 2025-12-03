@@ -85,6 +85,7 @@ training:
     type: "CosineAnnealingLR"
     T_max: 60            # 等于 epochs
     eta_min: 1.0e-6
+    warmup_epochs: 2     # 头两个 epoch 线性 warmup，到 base lr
   
   # ========== 核心修改：损失权重 ==========
   loss_weights:

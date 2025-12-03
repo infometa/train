@@ -49,14 +49,16 @@ class MultiResolutionSTFTLoss(nn.Module):
             self.windows.append(nn.Parameter(win, requires_grad=False))
     
     def _get_frequency_weight(self, freq_bins: int, fft_size: int, device: torch.device) -> torch.Tensor:
-        """生成频率加权向量（高频平滑过渡）"""
+        """生成频率加权向量（高频平滑过渡，sigmoid）"""
         weight = torch.ones(freq_bins, device=device)
         
         hf_start_bin = int(self.hf_cutoff * fft_size / self.sample_rate)
         if hf_start_bin < freq_bins:
-            # 线性渐变到 nyquist
-            ramp = torch.linspace(0.0, 1.0, freq_bins - hf_start_bin, device=device)
-            weight[hf_start_bin:] = 1.0 + (self.hf_weight - 1.0) * ramp
+            bins = torch.arange(freq_bins, device=device, dtype=torch.float32)
+            transition_width = max(1, (freq_bins - hf_start_bin) // 4)
+            sigmoid_input = (bins - hf_start_bin) / transition_width
+            smooth_ramp = torch.sigmoid(sigmoid_input)
+            weight = 1.0 + (self.hf_weight - 1.0) * smooth_ramp
         
         return weight.view(1, -1, 1)  # [1, F, 1] for broadcasting
     
@@ -170,8 +172,9 @@ class AdversarialLoss(nn.Module):
 class FeatureMatchingLoss(nn.Module):
     """特征匹配损失"""
     
-    def __init__(self):
+    def __init__(self, layer_weights: Optional[List[float]] = None):
         super().__init__()
+        self.layer_weights = layer_weights
     
     def forward(
         self,
@@ -187,8 +190,11 @@ class FeatureMatchingLoss(nn.Module):
         count = 0
         
         for fake_scale, real_scale in zip(fake_features, real_features):
-            for fake_feat, real_feat in zip(fake_scale, real_scale):
-                loss = loss + F.l1_loss(fake_feat, real_feat.detach())
+            for idx, (fake_feat, real_feat) in enumerate(zip(fake_scale, real_scale)):
+                w = 1.0
+                if self.layer_weights and idx < len(self.layer_weights):
+                    w = self.layer_weights[idx]
+                loss = loss + w * F.l1_loss(fake_feat, real_feat.detach())
                 count += 1
         
         return loss / max(count, 1)
@@ -228,7 +234,7 @@ class GeneratorLoss(nn.Module):
         self.adv_loss = AdversarialLoss(mode="lsgan")
         
         # Feature Matching Loss
-        self.fm_loss = FeatureMatchingLoss()
+        self.fm_loss = FeatureMatchingLoss(layer_weights=[1.0, 0.5, 0.25, 0.125])
     
     def forward(
         self,

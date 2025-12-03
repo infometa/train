@@ -332,9 +332,9 @@ class CausalUNetGenerator(nn.Module):
             use_weight_norm=use_weight_norm
         )
         
-        # 残差缩放因子（可学习），初始化为 1.0
+        # 残差缩放因子（可学习），初始化为较小值避免初期扰动过大
         # 模型输出 = 输入 + residual_scale * 网络输出
-        self.residual_scale = nn.Parameter(torch.ones(1))
+        self.residual_scale = nn.Parameter(torch.ones(1) * 0.1)
     
     def forward(self, x: torch.Tensor, rnn_state: Optional[torch.Tensor] = None, return_state: bool = False):
         """
@@ -387,7 +387,8 @@ class CausalUNetGenerator(nn.Module):
         # 输出 = 原始输入 + 学习到的残差
         # 模型只需要学习 (clean - degraded)，任务更简单
         x = residual + self.residual_scale * x
-        # 训练阶段不强制裁剪，推理阶段保护性 clamp
+        # 软约束，防止过大振幅，保持可导
+        x = torch.tanh(x * 0.5) * 2.0
         if not self.training:
             x = torch.clamp(x, -1.0, 1.0)
         # =========================================
