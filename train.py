@@ -280,7 +280,8 @@ class Trainer:
             shuffle=(train_sampler is None),
             sampler=train_sampler,
             num_workers=data_config['num_workers'],
-            pin_memory=torch.cuda.is_available(),
+            pin_memory=False,
+            persistent_workers=True,
             drop_last=True,
         )
 
@@ -290,7 +291,8 @@ class Trainer:
             shuffle=False,
             sampler=None,  # 验证集不分片，确保所有进程（或主进程）看到完整验证集
             num_workers=data_config['num_workers'],
-            pin_memory=torch.cuda.is_available(),
+            pin_memory=False,
+            persistent_workers=True,
             drop_last=True,
         )
         
