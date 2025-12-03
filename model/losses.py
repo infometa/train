@@ -49,17 +49,14 @@ class MultiResolutionSTFTLoss(nn.Module):
             self.windows.append(nn.Parameter(win, requires_grad=False))
     
     def _get_frequency_weight(self, freq_bins: int, fft_size: int, device: torch.device) -> torch.Tensor:
-        """生成频率加权向量"""
+        """生成频率加权向量（高频平滑过渡）"""
         weight = torch.ones(freq_bins, device=device)
         
-        # 计算高频起始 bin
-        # freq = bin_index * sample_rate / fft_size
-        # bin_index = freq * fft_size / sample_rate
         hf_start_bin = int(self.hf_cutoff * fft_size / self.sample_rate)
-        
-        # 高频部分加权
         if hf_start_bin < freq_bins:
-            weight[hf_start_bin:] = self.hf_weight
+            # 线性渐变到 nyquist
+            ramp = torch.linspace(0.0, 1.0, freq_bins - hf_start_bin, device=device)
+            weight[hf_start_bin:] = 1.0 + (self.hf_weight - 1.0) * ramp
         
         return weight.view(1, -1, 1)  # [1, F, 1] for broadcasting
     

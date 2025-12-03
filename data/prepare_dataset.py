@@ -164,6 +164,7 @@ def process_single_file(
         target_sr = config['sample_rate']
         segment_length = config['segment_length']
         save_segment_length = config.get('save_segment_length', segment_length)
+        segment_hop = max(1, config.get('segment_hop', save_segment_length // 2))
         snr_range = config['snr_range']
         ir_prob = config['ir_prob']
         
@@ -174,48 +175,55 @@ def process_single_file(
         if len(clean) < save_segment_length:
             return None
         
-        # 随机裁剪
-        if len(clean) > save_segment_length:
-            start = random.randint(0, len(clean) - save_segment_length)
-            clean = clean[start:start + save_segment_length]
+        # 多片段切分（滑窗）
+        max_start = len(clean) - save_segment_length
+        starts = list(range(0, max_start + 1, segment_hop))
+        if starts[-1] != max_start:
+            starts.append(max_start)
         
-        # 归一化
-        clean = clean / (np.abs(clean).max() + 1e-8) * 0.9
+        samples = []
+        for seg_idx, start in enumerate(starts):
+            clean_seg = clean[start:start + save_segment_length]
+            
+            # 归一化
+            clean_seg = clean_seg / (np.abs(clean_seg).max() + 1e-8) * 0.9
+            
+            # 创建退化版本
+            degraded = clean_seg.copy()
+            
+            # 随机添加混响（按需加载）
+            add_ir = random.random() < ir_prob and len(irs) > 0
+            if add_ir:
+                ir_path = random.choice(irs)
+                ir, _ = load_audio_file(ir_path, target_sr)
+                degraded = add_reverb(degraded, ir)
+            
+            # 随机添加噪声（按需加载）
+            snr = random.uniform(snr_range[0], snr_range[1])
+            if len(noise) == 0:
+                raise RuntimeError("噪声列表为空")
+            noise_path = random.choice(noise)
+            noise_arr = load_noise_file(str(noise_path), target_sr)
+            degraded = add_noise(degraded, noise_arr, snr)
+            
+            # 文件名
+            file_id = f"{idx:08d}_{seg_idx:02d}"
+            clean_out = output_clean_dir / f"{file_id}.wav"
+            degraded_out = output_degraded_dir / f"{file_id}.wav"
+            
+            # 保存（这里保存的是加噪版本，后续批量过 DF）
+            sf.write(clean_out, clean_seg, target_sr)
+            sf.write(degraded_out, degraded, target_sr)
+            
+            samples.append({
+                'id': file_id,
+                'clean': str(clean_out),
+                'degraded': str(degraded_out),
+                'snr': snr,
+                'has_reverb': add_ir
+            })
         
-        # 创建退化版本
-        degraded = clean.copy()
-        
-        # 随机添加混响（按需加载）
-        add_ir = random.random() < ir_prob and len(irs) > 0
-        if add_ir:
-            ir_path = random.choice(irs)
-            ir, _ = load_audio_file(ir_path, target_sr)
-            degraded = add_reverb(degraded, ir)
-        
-        # 随机添加噪声（按需加载）
-        snr = random.uniform(snr_range[0], snr_range[1])
-        if len(noise) == 0:
-            raise RuntimeError("噪声列表为空")
-        noise_path = random.choice(noise)
-        noise_arr = load_noise_file(str(noise_path), target_sr)
-        degraded = add_noise(degraded, noise_arr, snr)
-        
-        # 文件名
-        file_id = f"{idx:08d}"
-        clean_out = output_clean_dir / f"{file_id}.wav"
-        degraded_out = output_degraded_dir / f"{file_id}.wav"
-        
-        # 保存（这里保存的是加噪版本，后续批量过 DF）
-        sf.write(clean_out, clean, target_sr)
-        sf.write(degraded_out, degraded, target_sr)
-        
-        return {
-            'id': file_id,
-            'clean': str(clean_out),
-            'degraded': str(degraded_out),
-            'snr': snr,
-            'has_reverb': add_ir
-        }
+        return samples
         
     except Exception as e:
         print(f"Error processing {clean_path}: {e}")
@@ -378,6 +386,7 @@ def main():
         'sample_rate': data_config['sample_rate'],
         'segment_length': data_config['segment_length'],
         'save_segment_length': data_config.get('save_segment_length', data_config['segment_length']),
+        'segment_hop': data_config.get('segment_hop', data_config.get('save_segment_length', data_config['segment_length']) // 2),
         'snr_range': data_config['snr_range'],
         'ir_prob': data_config['ir_prob'],
     }
@@ -400,7 +409,10 @@ def main():
         for future in tqdm(as_completed(futures), total=len(futures)):
             result = future.result()
             if result:
-                results.append(result)
+                if isinstance(result, list):
+                    results.extend(result)
+                else:
+                    results.append(result)
     
     print(f"Generated {len(results)} samples")
     

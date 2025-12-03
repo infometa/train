@@ -187,7 +187,7 @@ class TimbreRestoreDataset(Dataset):
         # 数据增强
         if self.augment:
             # 随机增益
-            gain = random.uniform(0.5, 1.0)
+            gain = random.uniform(0.7, 1.3)
             degraded = degraded * gain
             clean = clean * gain
             
