@@ -40,7 +40,7 @@ data:
 
   # DF 引入的潜在延迟对齐（样本级，全局估计）
   align_df_delay: true
-  align_max_shift: 1200     # 最大估计偏移（样本），约 25ms，覆盖 DF 场景差异
+  align_max_shift: 2000     # 最大估计偏移（样本），约 42ms，覆盖更多 DF 场景差异
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader

@@ -148,18 +148,26 @@ class TimbreRestoreDataset(Dataset):
             if offset != 0:
                 degraded, clean = self._apply_offset(degraded, clean, offset)
         
-        # 随机裁剪或填充
-        if len(degraded) >= self.segment_length:
-            # 随机起始点
+        # 随机裁剪或填充（对齐后长度可能略短）
+        current_len = len(degraded)
+        if current_len >= self.segment_length:
+            # 正常裁剪
             if self.augment:
-                start = random.randint(0, len(degraded) - self.segment_length)
+                start = random.randint(0, current_len - self.segment_length)
             else:
                 start = 0
             degraded = degraded[start:start + self.segment_length]
             clean = clean[start:start + self.segment_length]
+        elif current_len >= int(self.segment_length * 0.9):
+            # 略短于目标长度：居中并用反射填充两侧，避免大块零
+            deficit = self.segment_length - current_len
+            pad_left = deficit // 2
+            pad_right = deficit - pad_left
+            degraded = np.pad(degraded, (pad_left, pad_right), mode='reflect')
+            clean = np.pad(clean, (pad_left, pad_right), mode='reflect')
         else:
-            # 填充
-            pad_len = self.segment_length - len(degraded)
+            # 远短于目标：零填充（极少出现）
+            pad_len = self.segment_length - current_len
             degraded = np.pad(degraded, (0, pad_len), mode='constant')
             clean = np.pad(clean, (0, pad_len), mode='constant')
         
@@ -171,8 +179,8 @@ class TimbreRestoreDataset(Dataset):
             clean = clean * gain
         
         # 转为 Tensor [1, T]
-        degraded = torch.from_numpy(degraded).unsqueeze(0)
-        clean = torch.from_numpy(clean).unsqueeze(0)
+        degraded = torch.from_numpy(degraded.astype(np.float32)).unsqueeze(0)
+        clean = torch.from_numpy(clean.astype(np.float32)).unsqueeze(0)
         
         return degraded, clean
 
