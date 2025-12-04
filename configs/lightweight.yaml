@@ -14,9 +14,9 @@ data:
   segment_length: 24000       # 0.5 秒训练段
   save_segment_length: 48000  # 保存 1 秒，避免丢短音频
   segment_hop: 24000          # 0.5 秒步长
-  snr_range: [10, 30]     # 提升下限，聚焦高质量修复场景
+  snr_range: [12, 30]     # 再提升下限，聚焦高质量修复场景
   noise_prob: 0.85        # 略增加纯净样本占比
-  ir_prob: 0.7
+  ir_prob: 0.5            # 降低混响概率，避免过度失真
 
   dataset_ratio:
     vctk: 0.3
