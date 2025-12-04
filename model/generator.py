@@ -383,10 +383,10 @@ class CausalUNetGenerator(nn.Module):
         elif x.size(-1) < input_len:
             x = F.pad(x, (0, input_len - x.size(-1)))
         
-        # ========== 核心改进：残差学习 ==========
-        # 输出 = 原始输入 + 学习到的残差
-        # 模型只需要学习 (clean - degraded)，任务更简单
-        x = residual + self.residual_scale * x
+        # ========== 核心改进：残差学习 + 静音门控 ==========
+        # 软门控：静音段（|residual| 很小）时 gate≈0，避免噪声注入静音
+        gate = torch.tanh(torch.abs(residual) * 30.0)
+        x = residual + self.residual_scale * x * gate
         # 温和软限制，保持大部分线性区域，同时抑制过大振幅
         x = x / (1.0 + 0.1 * torch.abs(x))
         if not self.training:
