@@ -531,7 +531,9 @@ def main():
     if os.path.exists(data_config['aishell3_path']):
         aishell_files = scan_audio_files(data_config['aishell3_path'], ['.wav'])
         print(f"  Aishell3: {len(aishell_files)} files")
-    
+
+    # 固定随机种子，确保在多分片/多进程情况下抽样顺序一致，避免文件名冲突或覆盖
+    random.seed(42)
     # 按比例抽取（可选）
     dataset_ratio = data_config.get('dataset_ratio')
     if dataset_ratio:
