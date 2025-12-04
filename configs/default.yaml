@@ -44,7 +44,7 @@ data:
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader
-  num_workers: 1            # 避免 shm 压力，兼顾加载速度
+  num_workers: 8            # 提高加载并行度，如遇 shm 问题再调低
 
 # 模型配置
 model:
