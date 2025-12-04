@@ -187,27 +187,36 @@ def process_single_file(
         total_len = len(clean)
         samples = []
         # 根据长度决定切片策略
+        starts: List[int] = []
         if total_len < segment_length:
+            # 太短则零填充到 segment_length，只切 1 段
             pad_len = segment_length - total_len
             clean = np.pad(clean, (0, pad_len), mode='constant')
             starts = [0]
             seg_len = segment_length
         elif total_len <= save_segment_length:
+            # 不足一段保存长度，直接用全长
             starts = [0]
             seg_len = total_len
         else:
+            # 长音频按 save_segment_length 进行滑窗切片
             seg_len = save_segment_length
             max_start = total_len - save_segment_length
             starts = list(range(0, max_start + 1, segment_hop))
             if starts[-1] != max_start:
                 starts.append(max_start)
-        
+
         for seg_idx, start in enumerate(starts):
             clean_seg = clean[start:start + seg_len]
-            
+
+            # 静音过滤：RMS 过低则跳过该片段（约 -54 dB）
+            rms = np.sqrt(np.mean(clean_seg ** 2) + 1e-12)
+            if rms < 2e-3:
+                continue
+
             # 归一化
             clean_seg = clean_seg / (np.abs(clean_seg).max() + 1e-8) * 0.9
-            
+
             # 创建退化版本
             degraded = clean_seg.copy()
             
@@ -319,11 +328,18 @@ def run_deepfilter_batch(
 
 def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
     """估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本）"""
+    # 静音或能量过低，直接视为无偏移
+    if np.std(clean) < 1e-4 or np.std(degraded) < 1e-4:
+        return 0
     if max_shift <= 0:
         return 0
     down_factor = max(1, sample_rate // 16000)
     clean_ds = clean[::down_factor]
     degraded_ds = degraded[::down_factor]
+    if clean_ds.ndim > 1:
+        clean_ds = clean_ds.flatten()
+    if degraded_ds.ndim > 1:
+        degraded_ds = degraded_ds.flatten()
     max_shift_ds = max(1, int(max_shift / down_factor))
     max_shift_ds = min(max_shift_ds, len(clean_ds) - 1, len(degraded_ds) - 1)
     if max_shift_ds <= 0:
@@ -367,11 +383,8 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
             bad += 1
             continue
         try:
-            deg, sr = sf.read(p)
-            cln, sr2 = sf.read(clean_path)
-            if sr != sr2:
-                deg = load_audio_file(p, sample_rate)[0]
-                cln = load_audio_file(clean_path, sample_rate)[0]
+            deg, _ = load_audio_file(p, sample_rate)
+            cln, _ = load_audio_file(clean_path, sample_rate)
             offset = _estimate_offset(cln, deg, max_shift, sample_rate)
             if offset != 0:
                 # 强制认为 DF 只会引入正延迟，防止负偏移反向错位
