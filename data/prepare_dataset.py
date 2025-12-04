@@ -253,8 +253,8 @@ def process_single_file(
             # 保存（这里保存的是加噪版本，后续批量过 DF），使用临时文件避免半写
             tmp_clean = str(clean_out) + ".tmp"
             tmp_deg = str(degraded_out) + ".tmp"
-            sf.write(tmp_clean, clean_seg, target_sr)
-            sf.write(tmp_deg, degraded, target_sr)
+            sf.write(tmp_clean, clean_seg, target_sr, format="WAV")
+            sf.write(tmp_deg, degraded, target_sr, format="WAV")
             os.replace(tmp_clean, clean_out)
             os.replace(tmp_deg, degraded_out)
             

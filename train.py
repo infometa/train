@@ -281,8 +281,8 @@ class Trainer:
             sampler=train_sampler,
             num_workers=data_config['num_workers'],
             pin_memory=True if self.device.type == 'cuda' else False,
-            persistent_workers=False,
-            prefetch_factor=1,
+            persistent_workers=True if data_config['num_workers'] > 0 else False,
+            prefetch_factor=2 if data_config['num_workers'] > 0 else None,
             drop_last=True,
         )
 
@@ -293,8 +293,8 @@ class Trainer:
             sampler=None,  # 验证集不分片，确保所有进程（或主进程）看到完整验证集
             num_workers=data_config['num_workers'],
             pin_memory=True if self.device.type == 'cuda' else False,
-            persistent_workers=False,
-            prefetch_factor=1,
+            persistent_workers=True if data_config['num_workers'] > 0 else False,
+            prefetch_factor=2 if data_config['num_workers'] > 0 else None,
             drop_last=False,
         )
         
