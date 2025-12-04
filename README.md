@@ -101,30 +101,38 @@ python export_onnx.py \
 
 ```bash
 python - <<'PY'
-import random, pathlib, numpy as np, soundfile as sf
-txt = pathlib.Path("/data/train_data_lite/train.txt")  # 换成你的 train.txt
-pairs = []
-for line in txt.read_text().splitlines():
-    if '|' not in line: continue
-    d,c = line.split('|',1)
-    pairs.append((pathlib.Path(d), pathlib.Path(c)))
+import random, numpy as np, pathlib, sys
+sys.path.insert(0,'.')
+from data.dataset import TimbreRestoreDataset
 
-print("样本数:", len(pairs))
+txt = "/data/train_data_lite/train.txt"  # 换成你的 train.txt
+ds = TimbreRestoreDataset(
+    txt,
+    segment_length=48000,
+    sample_rate=48000,
+    align_df_delay=True,
+    align_max_shift=4000,  # 与配置一致
+    augment=False,         # 关闭增强，便于测量
+)
+print("样本数:", len(ds))
 
-# 1) 存在性与大小检查
+# 1) 存在性与大小检查（直接扫文件列表）
 missing = []
+pairs = [l.split('|',1) for l in pathlib.Path(txt).read_text().splitlines() if '|' in l]
 for d,c in random.sample(pairs, min(200, len(pairs))):
+    d = pathlib.Path(d); c = pathlib.Path(c)
     if (not d.exists()) or (not c.exists()) or d.stat().st_size < 1024 or c.stat().st_size < 1024:
         missing.append((d,c))
 print("存在性可疑条目:", len(missing))
 
-# 2) 对齐偏移 & 长度差
+# 2) 对齐偏移 & 长度差（经过 Dataset 对齐后）
 shifts = []
 len_diff = []
-for d,c in random.sample(pairs, min(100, len(pairs))):
-    x,_ = sf.read(d); y,_ = sf.read(c)
+for _ in range(min(100, len(ds))):
+    d,c = ds[random.randint(0,len(ds)-1)]
+    x,y = d.numpy().flatten(), c.numpy().flatten()
     n = min(len(x), len(y), 48000)
-    x = x[:n]; y = y[:n]
+    x,y = x[:n], y[:n]
     corr = np.correlate(y, x, mode='full')
     lag = np.argmax(corr) - (n-1)
     shifts.append(lag)
@@ -132,12 +140,13 @@ for d,c in random.sample(pairs, min(100, len(pairs))):
 print("shift_samples: mean=%.1f, min=%d, max=%d" % (np.mean(shifts), np.min(shifts), np.max(shifts)))
 print("len_diff: mean=%.1f, min=%d, max=%d" % (np.mean(len_diff), np.min(len_diff), np.max(len_diff)))
 
-# 3) SNR 粗测
+# 3) SNR 粗测（对齐后）
 snrs = []
-for d,c in random.sample(pairs, min(100, len(pairs))):
-    x,_ = sf.read(d); y,_ = sf.read(c)
+for _ in range(min(100, len(ds))):
+    d,c = ds[random.randint(0,len(ds)-1)]
+    x,y = d.numpy().flatten(), c.numpy().flatten()
     n = min(len(x), len(y))
-    x = x[:n]; y = y[:n]
+    x,y = x[:n], y[:n]
     nse = y - x
     snr = 10*np.log10(np.mean(y**2)/(np.mean(nse**2)+1e-9))
     snrs.append(snr)
