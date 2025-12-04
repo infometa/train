@@ -375,34 +375,78 @@ def _apply_offset(degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple
 
 
 def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_shift: int = 1200):
-    """DF 处理后对齐 degraded 与 clean（就地覆盖 degraded）"""
+    """
+    DF 处理后对齐 degraded 与 clean（就地覆盖 degraded/clean）
+    增强版：增加质量门控（长度/相关性）与安全写入，自动删除低质量样本
+    """
     files = sorted(degraded_dir.glob("*.wav"))
     if not files:
         return
     print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples")
-    bad = 0
+    
+    MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
+    MIN_CORR = 0.4          # 归一化互相关阈值，过滤 DF 失败或静音样本
+    stats = {"processed": 0, "success": 0, "dropped_len": 0, "dropped_corr": 0, "errors": 0}
+    
     for p in tqdm(files):
+        stats["processed"] += 1
         clean_path = clean_dir / p.name
         if not clean_path.exists():
-            bad += 1
+            stats["errors"] += 1
             continue
         try:
             deg, _ = load_audio_file(p, sample_rate)
             cln, _ = load_audio_file(clean_path, sample_rate)
+            
+            # 应用偏移
             offset = _estimate_offset(cln, deg, max_shift, sample_rate)
             if offset != 0:
                 deg, cln = _apply_offset(deg, cln, offset)
-            # 无论是否偏移，都强制裁剪到相同长度再写回
+            
+            # 长度检查
             min_len = min(len(deg), len(cln))
+            if min_len < MIN_LEN:
+                stats["dropped_len"] += 1
+                try:
+                    p.unlink(missing_ok=True)
+                    clean_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                continue
             deg = deg[:min_len]
             cln = cln[:min_len]
-            sf.write(p, deg, sample_rate, format="WAV")
-            sf.write(clean_path, cln, sample_rate, format="WAV")
+            
+            # 相关性检查（归一化点积）
+            norm_deg = np.linalg.norm(deg) + 1e-9
+            norm_cln = np.linalg.norm(cln) + 1e-9
+            score = float(np.dot(deg, cln) / (norm_deg * norm_cln))
+            if score < MIN_CORR:
+                stats["dropped_corr"] += 1
+                try:
+                    p.unlink(missing_ok=True)
+                    clean_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                continue
+            
+            # 安全写入：先写 tmp 再原子替换
+            tmp_p = str(p) + ".tmp"
+            tmp_c = str(clean_path) + ".tmp"
+            sf.write(tmp_p, deg, sample_rate, format="WAV")
+            sf.write(tmp_c, cln, sample_rate, format="WAV")
+            os.replace(tmp_p, p)
+            os.replace(tmp_c, clean_path)
+            stats["success"] += 1
         except Exception as e:
-            bad += 1
+            stats["errors"] += 1
             print(f"[align] Error aligning {p}: {e}")
-    if bad:
-        print(f"[align] Skipped/failed: {bad} files")
+    
+    print("\n[align] Quality Report:")
+    print(f"  Processed   : {stats['processed']}")
+    print(f"  Success     : {stats['success']}")
+    print(f"  Drop (len)  : {stats['dropped_len']}")
+    print(f"  Drop (corr) : {stats['dropped_corr']}")
+    print(f"  Errors      : {stats['errors']}")
 
 
 def main():
@@ -583,10 +627,20 @@ def main():
         if name in failed_df_set:
             continue
         degraded_path = degraded_dir / name
-        if not degraded_path.exists():
+        clean_path = clean_dir / name
+        # 对齐阶段可能删除了低质量样本，需重新校验
+        if not degraded_path.exists() or not clean_path.exists():
             print(f"Warning: {degraded_path} not found, skip sample")
             continue
+        # 简单大小检查，过滤损坏文件
+        try:
+            if degraded_path.stat().st_size <= 1024 or clean_path.stat().st_size <= 1024:
+                print(f"Warning: small file detected, skip sample: {name}")
+                continue
+        except Exception:
+            continue
         r['degraded'] = str(degraded_path)
+        r['clean'] = str(clean_path)
         filtered.append(r)
     print(f"Filtered samples: {len(results)} -> {len(filtered)}")
     results = filtered
