@@ -244,11 +244,19 @@ def process_single_file(
 
             # 已存在则跳过（支持分片/断点续跑）
             if skip_existing and clean_out.exists() and degraded_out.exists():
-                continue
+                try:
+                    if clean_out.stat().st_size > 1024 and degraded_out.stat().st_size > 1024:
+                        continue
+                except Exception:
+                    pass
             
-            # 保存（这里保存的是加噪版本，后续批量过 DF）
-            sf.write(clean_out, clean_seg, target_sr)
-            sf.write(degraded_out, degraded, target_sr)
+            # 保存（这里保存的是加噪版本，后续批量过 DF），使用临时文件避免半写
+            tmp_clean = str(clean_out) + ".tmp"
+            tmp_deg = str(degraded_out) + ".tmp"
+            sf.write(tmp_clean, clean_seg, target_sr)
+            sf.write(tmp_deg, degraded, target_sr)
+            os.replace(tmp_clean, clean_out)
+            os.replace(tmp_deg, degraded_out)
             
             samples.append({
                 'id': file_id,
@@ -288,7 +296,12 @@ def run_deepfilter_batch(
     for i, input_path in enumerate(tqdm(input_files)):
         output_path = output_dir / input_path.name
         if skip_existing and output_path.exists():
-            continue
+            # 简单完整性检查：>1KB
+            try:
+                if output_path.stat().st_size > 1024:
+                    continue
+            except Exception:
+                pass
         
         audio = None  # keep for fallback save
         sr = df_state.sr()
@@ -386,6 +399,9 @@ def main():
         clean_files = vctk_files + aishell_files
         if args.max_files:
             clean_files = clean_files[:args.max_files]
+
+    # 确保分片前顺序一致（避免并行重复/遗漏）
+    clean_files = sorted(clean_files)
     
     print(f"Total: {len(clean_files)} files")
     if len(clean_files) == 0:
@@ -469,16 +485,19 @@ def main():
             shutil.copy(f, degraded_dir / f.name)
     
     # 更新 results 中的 degraded 路径
+    failed_df_set = set(failed_df)
     filtered = []
     for r in results:
         name = Path(r['degraded']).name
-        if name in failed_df:
+        if name in failed_df_set:
             continue
         degraded_path = degraded_dir / name
         if not degraded_path.exists():
+            print(f"Warning: {degraded_path} not found, skip sample")
             continue
         r['degraded'] = str(degraded_path)
         filtered.append(r)
+    print(f"Filtered samples: {len(results)} -> {len(filtered)}")
     results = filtered
     
     # 划分训练/验证集
@@ -488,6 +507,20 @@ def main():
     train_results = results[val_size:]
     val_results = results[:val_size]
     
+    # 保存元数据前做存在性验证
+    print("\nValidating generated file pairs...")
+    invalid = 0
+    for r in train_results + val_results:
+        if not Path(r['degraded']).exists():
+            print(f"Missing degraded: {r['degraded']}")
+            invalid += 1
+        if not Path(r['clean']).exists():
+            print(f"Missing clean: {r['clean']}")
+            invalid += 1
+    if invalid > 0:
+        raise SystemExit(f"Found {invalid} invalid file references, aborting.")
+    print("Validation passed!")
+
     # 保存元数据
     metadata = {
         'train': train_results,

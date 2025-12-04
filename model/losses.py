@@ -25,7 +25,7 @@ class MultiResolutionSTFTLoss(nn.Module):
         win_lengths: List[int] = [512, 1024, 2048],
         window: str = "hann",
         sample_rate: int = 48000,
-        hf_weight: float = 2.0,      # 高频加权倍数
+        hf_weight: float = 1.5,      # 高频加权倍数
         hf_cutoff: int = 3000,       # 高频起始频率 (Hz)
     ):
         super().__init__()
@@ -205,8 +205,8 @@ class GeneratorLoss(nn.Module):
     
     def __init__(
         self,
-        l1_weight: float = 15.0,       # 从 45 降到 15
-        stft_weight: float = 2.0,      # 从 1 升到 2
+        l1_weight: float = 3.0,
+        stft_weight: float = 3.0,
         adv_weight: float = 1.0,
         fm_weight: float = 2.0,
         stft_config: Optional[dict] = None,
@@ -225,7 +225,7 @@ class GeneratorLoss(nn.Module):
                 'hop_sizes': [128, 256, 512],
                 'win_lengths': [512, 1024, 2048],
                 'sample_rate': 48000,
-                'hf_weight': 2.0,      # 高频加权
+                'hf_weight': 1.5,      # 高频加权
                 'hf_cutoff': 3000,     # 3kHz 以上
             }
         self.stft_loss = MultiResolutionSTFTLoss(**stft_config)
