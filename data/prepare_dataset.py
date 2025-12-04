@@ -448,7 +448,7 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
     print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={num_workers}")
     
     MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
-    MIN_CORR = 0.4          # 归一化互相关阈值，过滤 DF 失败或静音样本
+    MIN_CORR = 0.7          # 归一化互相关阈值，过滤 DF 失败或静音样本
 
     tasks = []
     for p in files:
