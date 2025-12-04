@@ -148,16 +148,12 @@ class TimbreRestoreDataset(Dataset):
             if offset != 0:
                 degraded, clean = self._apply_offset(degraded, clean, offset)
         
-        # 随机裁剪或填充（对齐后长度可能略短）
+        # 裁剪或填充（对齐后长度可能略短）
         current_len = len(degraded)
         if current_len >= self.segment_length:
-            # 正常裁剪
-            if self.augment:
-                start = random.randint(0, current_len - self.segment_length)
-            else:
-                start = 0
-            degraded = degraded[start:start + self.segment_length]
-            clean = clean[start:start + self.segment_length]
+            # 为保持对齐，固定从头裁剪
+            degraded = degraded[:self.segment_length]
+            clean = clean[:self.segment_length]
         elif current_len >= int(self.segment_length * 0.9):
             # 略短于目标长度：居中并用反射填充两侧，避免大块零
             deficit = self.segment_length - current_len
@@ -175,8 +171,7 @@ class TimbreRestoreDataset(Dataset):
         if self.augment:
             # 温和增益（约 ±1dB）
             gain = random.uniform(0.9, 1.1)
-            degraded = degraded * gain
-            clean = clean * gain
+            degraded = degraded * gain  # 仅对 degraded 增益，保持 target 不变
         
         # 转为 Tensor [1, T]
         degraded = torch.from_numpy(degraded.astype(np.float32)).unsqueeze(0)

@@ -125,11 +125,7 @@ def load_ir_files(ir_dir: str, target_sr: int = 48000) -> List[np.ndarray]:
 def add_reverb(audio: np.ndarray, ir: np.ndarray) -> np.ndarray:
     """添加混响（卷积），保持能量"""
     reverbed = signal.fftconvolve(audio, ir, mode='full')[:len(audio)]
-    # 能量归一化到原始 RMS
-    orig_rms = np.sqrt(np.mean(audio ** 2) + 1e-8)
-    rev_rms = np.sqrt(np.mean(reverbed ** 2) + 1e-8)
-    reverbed = reverbed * (orig_rms / rev_rms)
-    # 峰值保护
+    # 峰值保护，不做能量归一化，保持真实能量变化
     max_val = np.abs(reverbed).max()
     if max_val > 0.99:
         reverbed = reverbed * 0.99 / max_val
@@ -158,12 +154,8 @@ def add_noise(audio: np.ndarray, noise: np.ndarray, snr_db: float) -> np.ndarray
     noise_gain = np.sqrt(audio_power / (noise_power * snr_linear))
     
     noisy = audio + noise_gain * noise_segment
-    
-    # 归一化防止削波
-    max_val = np.abs(noisy).max()
-    if max_val > 0.99:
-        noisy = noisy * 0.99 / max_val
-    
+    # 软削波/裁剪，尽量不破坏 SNR
+    noisy = np.clip(noisy, -1.0, 1.0)
     return noisy.astype(np.float32)
 
 

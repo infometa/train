@@ -93,8 +93,8 @@ class Trainer:
         self._build_losses()
         
         # 混合精度
-        self.scaler_g = GradScaler()
-        self.scaler_d = GradScaler()
+        self.scaler_g = GradScaler(device=self.device.type)
+        self.scaler_d = GradScaler(device=self.device.type)
         
         # 日志
         if self.is_main:
@@ -295,7 +295,7 @@ class Trainer:
             pin_memory=False,
             persistent_workers=False,
             prefetch_factor=1,
-            drop_last=True,
+            drop_last=False,
         )
         
         if self.is_main:
@@ -435,30 +435,48 @@ class Trainer:
     def validate(self) -> dict:
         """验证"""
         self.generator.eval()
+        self.discriminator.eval()
         
         total_loss = 0.0
         total_l1 = 0.0
         total_stft = 0.0
+        total_adv = 0.0
         count = 0
+        train_config = self.config['training']
+        use_gan = self.epoch >= train_config['gan_start_epoch']
         
         for degraded, clean in self.val_loader:
             degraded = degraded.to(self.device)
             clean = clean.to(self.device)
             
             fake = self.generator(degraded)
-            loss, losses = self.g_loss_fn(fake, clean)
+
+            if use_gan:
+                fake_out, fake_feats = self.discriminator(fake)
+                _, real_feats = self.discriminator(clean)
+                loss, losses = self.g_loss_fn(
+                    fake, clean,
+                    disc_fake_outputs=fake_out,
+                    disc_fake_features=fake_feats,
+                    disc_real_features=real_feats,
+                )
+            else:
+                loss, losses = self.g_loss_fn(fake, clean)
             
             total_loss += loss.item()
-            total_l1 += losses['l1']
-            total_stft += losses['stft']
+            total_l1 += losses.get('l1', 0)
+            total_stft += losses.get('stft', 0)
+            total_adv += losses.get('adv', 0)
             count += 1
         
         self.generator.train()
+        self.discriminator.train()
         
         return {
             'val_loss': total_loss / max(count, 1),
             'val_l1': total_l1 / max(count, 1),
             'val_stft': total_stft / max(count, 1),
+            'val_adv': total_adv / max(count, 1),
         }
     
     @torch.no_grad()
@@ -566,11 +584,11 @@ class Trainer:
                         })
                 
                 # CosineAnnealingWarmRestarts 按 step 更新
-            if not self.scheduler_step_per_epoch and num_batches > 0:
-                if self.enable_scheduler:
-                    step_frac = epoch + batch_idx / num_batches
-                    self.scheduler_g.step(step_frac)
-                    self.scheduler_d.step(step_frac)
+                if not self.scheduler_step_per_epoch and num_batches > 0:
+                    if self.enable_scheduler:
+                        step_frac = epoch + batch_idx / num_batches
+                        self.scheduler_g.step(step_frac)
+                        self.scheduler_d.step(step_frac)
             
             # CosineAnnealingLR 按 epoch 更新
             if self.scheduler_step_per_epoch:
