@@ -231,7 +231,8 @@ class Trainer:
         train_config = self.config['training']
 
         align_df_delay = data_config.get('align_df_delay', False)
-        align_max_shift = data_config.get('align_max_shift', 2000)
+        # 与配置保持一致，覆盖 DeepFilterNet 可能的 80ms+ 延迟
+        align_max_shift = data_config.get('align_max_shift', 4000)
         align_sample_count = data_config.get('align_sample_count', 32)
         
         output_dir = Path(data_config['output_dir'])

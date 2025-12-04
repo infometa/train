@@ -144,14 +144,12 @@ def export_onnx(
     if include_state:
         if not (hasattr(model.bottleneck, "gru") or hasattr(model.bottleneck, "lstm")):
             raise RuntimeError("include_state=True requires a GRU/LSTM bottleneck")
-        num_layers = model.bottleneck.gru.num_layers if hasattr(model.bottleneck, "gru") else getattr(model.bottleneck, "num_layers", 1)
-    hidden_size = model.channels[-1]
-    # 如果 bottleneck 显式指定了隐藏维度，优先使用
-    if hasattr(model, "bottleneck"):
         if hasattr(model.bottleneck, "gru"):
             hidden_size = model.bottleneck.gru.hidden_size
-        elif hasattr(model.bottleneck, "lstm"):
+            num_layers = model.bottleneck.gru.num_layers
+        else:
             hidden_size = model.bottleneck.lstm.hidden_size
+            num_layers = model.bottleneck.lstm.num_layers
         h0 = torch.zeros(num_layers, 1, hidden_size)
         input_names.append('h_in')
         output_names.append('h_out')
@@ -225,8 +223,15 @@ def verify_onnx(
         # 随机输入
         x = torch.randn(1, 1, length)
         if include_state:
-            num_layers = wrapper.model.bottleneck.gru.num_layers if hasattr(wrapper.model.bottleneck, "gru") else getattr(wrapper.model.bottleneck, "num_layers", 1)
-            hidden_size = wrapper.model.channels[-1]
+            if hasattr(wrapper.model.bottleneck, "gru"):
+                num_layers = wrapper.model.bottleneck.gru.num_layers
+                hidden_size = wrapper.model.bottleneck.gru.hidden_size
+            elif hasattr(wrapper.model.bottleneck, "lstm"):
+                num_layers = wrapper.model.bottleneck.lstm.num_layers
+                hidden_size = wrapper.model.bottleneck.lstm.hidden_size
+            else:
+                num_layers = 1
+                hidden_size = wrapper.model.channels[-1]
             h0 = torch.zeros(num_layers, 1, hidden_size)
         
         ort_inputs = {'input': x.numpy()}

@@ -83,11 +83,11 @@ class TimbreRestoreDataset(Dataset):
 
     @staticmethod
     def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
-        """估计单个样本对的相对偏移（degraded 相对于 clean 的延迟，单位：样本）"""
+        """估计单个样本对的相对偏移（degraded 相对于 clean 的延迟，单位：样本），使用 FFT 互相关"""
         if max_shift <= 0:
             return 0
-        # 下采样以降低计算成本（目标 ~12kHz）
-        down_factor = max(1, sample_rate // 12000)
+        # 下采样以降低计算成本（目标 ~16kHz）
+        down_factor = max(1, sample_rate // 16000)
         clean_ds = clean[::down_factor]
         degraded_ds = degraded[::down_factor]
         max_shift_ds = max(1, int(max_shift / down_factor))
@@ -95,24 +95,28 @@ class TimbreRestoreDataset(Dataset):
         if max_shift_ds <= 0:
             return 0
 
-        best_lag = 0
-        best_score = -np.inf
-        for lag in range(-max_shift_ds, max_shift_ds + 1):
-            if lag >= 0:
-                c = clean_ds[:len(clean_ds) - lag]
-                d = degraded_ds[lag:len(degraded_ds)]
-            else:
-                c = clean_ds[-lag:]
-                d = degraded_ds[:len(degraded_ds) + lag]
-            if len(c) == 0 or len(d) == 0:
-                continue
-            # 归一化互相关，更鲁棒
-            c_norm = c / (np.linalg.norm(c) + 1e-8)
-            d_norm = d / (np.linalg.norm(d) + 1e-8)
-            score = np.dot(c_norm, d_norm)
-            if score > best_score:
-                best_score = score
-                best_lag = lag
+        # 零均值，提升相关峰显著性
+        clean_ds = clean_ds - np.mean(clean_ds)
+        degraded_ds = degraded_ds - np.mean(degraded_ds)
+
+        n = len(clean_ds)
+        m = len(degraded_ds)
+        size = 1 << int(np.ceil(np.log2(n + m - 1)))
+        fft_clean = np.fft.rfft(clean_ds, size)
+        fft_deg = np.fft.rfft(degraded_ds, size)
+        corr = np.fft.irfft(fft_clean * np.conj(fft_deg), size)
+
+        lags = np.arange(- (m - 1), n)
+        # 限制到 ±max_shift_ds
+        valid = (lags >= -max_shift_ds) & (lags <= max_shift_ds)
+        if not np.any(valid):
+            return 0
+        corr = corr[:len(lags)][valid]
+        lags = lags[valid]
+
+        best_idx = int(np.argmax(corr))
+        best_lag = int(lags[best_idx])
+
         return int(best_lag * down_factor)
 
     def _apply_offset(self, degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
