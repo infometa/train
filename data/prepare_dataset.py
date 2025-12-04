@@ -344,12 +344,12 @@ def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sa
 
 def _apply_offset(degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
     """应用偏移并裁剪到相同长度"""
+    # 对齐方向：DeepFilterNet 典型为正延迟（degraded 滞后），若检测到负值则取绝对值防止反向错位
+    if offset < 0:
+        offset = -offset
     if offset > 0:
         degraded = degraded[offset:]
         clean = clean[:len(degraded)]
-    elif offset < 0:
-        clean = clean[-offset:]
-        degraded = degraded[:len(clean)]
     min_len = min(len(degraded), len(clean))
     return degraded[:min_len], clean[:min_len]
 
@@ -374,6 +374,9 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
                 cln = load_audio_file(clean_path, sample_rate)[0]
             offset = _estimate_offset(cln, deg, max_shift, sample_rate)
             if offset != 0:
+                # 强制认为 DF 只会引入正延迟，防止负偏移反向错位
+                if offset < 0:
+                    offset = -offset
                 deg, cln = _apply_offset(deg, cln, offset)
                 sf.write(p, deg, sample_rate, format="WAV")
                 sf.write(clean_path, cln, sample_rate, format="WAV")
