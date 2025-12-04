@@ -395,6 +395,16 @@ def _align_worker(args):
         cln, _ = load_audio_file(clean_path, sample_rate)
 
         offset = _estimate_offset(cln, deg, max_shift, sample_rate)
+        # 如果偏移为 0 或绝对值过大，视为对齐失败，直接丢弃
+        if offset == 0 or abs(offset) > 5:
+            stats["dropped_corr"] = 1
+            try:
+                p.unlink(missing_ok=True)
+                clean_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return stats
+
         if offset != 0:
             deg, cln = _apply_offset(deg, cln, offset)
 
@@ -448,7 +458,7 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
     print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={num_workers}")
     
     MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
-    MIN_CORR = 0.7          # 归一化互相关阈值，过滤 DF 失败或静音样本
+    MIN_CORR = 0.75         # 归一化互相关阈值，过滤 DF 失败或静音样本
 
     tasks = []
     for p in files:
