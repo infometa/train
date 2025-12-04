@@ -25,7 +25,7 @@ class TimbreRestoreDataset(Dataset):
         sample_rate: int = 48000,
         augment: bool = True,
         align_df_delay: bool = False,
-        align_max_shift: int = 240,
+        align_max_shift: int = 1000,
         align_sample_count: int = 32,
     ):
         """
@@ -57,14 +57,8 @@ class TimbreRestoreDataset(Dataset):
         
         print(f"Loaded {len(self.pairs)} audio pairs from {file_list}")
 
-        # 估计 DF 带来的全局延迟（样本级）
-        self.global_offset = 0
         if self.align_df_delay and len(self.pairs) > 0 and self.align_max_shift > 0:
-            self.global_offset = self._estimate_global_offset()
-            if self.global_offset != 0:
-                print(f"[align] Estimated DF delay: {self.global_offset} samples (applied to degraded)")
-            else:
-                print("[align] No delay detected between degraded and clean (within search window)")
+            print(f"[align] Per-sample alignment enabled, max_shift={self.align_max_shift} samples")
     
     def __len__(self) -> int:
         return len(self.pairs)
@@ -121,43 +115,19 @@ class TimbreRestoreDataset(Dataset):
                 best_lag = lag
         return int(best_lag * down_factor)
 
-    def _estimate_global_offset(self) -> int:
-        """采样若干对数据估计全局固定延迟"""
-        sample_num = min(len(self.pairs), self.align_sample_count)
-        sample_pairs = random.sample(self.pairs, sample_num)
-        offsets = []
-        for degraded_path, clean_path in sample_pairs:
-            try:
-                degraded = self.load_audio(degraded_path)
-                clean = self.load_audio(clean_path)
-                min_len = min(len(degraded), len(clean))
-                degraded = degraded[:min_len]
-                clean = clean[:min_len]
-                offset = self._estimate_offset(clean, degraded, self.align_max_shift, self.sample_rate)
-                offsets.append(offset)
-            except Exception:
-                continue
-        if len(offsets) == 0:
-            return 0
-        return int(np.median(offsets))
-
-    def _apply_offset(self, degraded: np.ndarray, clean: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """按全局估计的延迟对齐 degraded 与 clean"""
-        if self.global_offset == 0:
+    def _apply_offset(self, degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
+        """按单条样本估计的延迟对齐 degraded 与 clean"""
+        if offset == 0:
             return degraded, clean
-        offset = self.global_offset
         if offset > 0:
-            # degraded 滞后：左移并在末尾补零
+            # degraded 滞后：裁掉 degraded 开头
             degraded = degraded[offset:]
-            degraded = np.pad(degraded, (0, max(0, len(clean) - len(degraded))), mode='constant')
+            clean = clean[:len(degraded)]
         else:
-            # degraded 领先：右移并在开头补零
+            # degraded 领先：裁掉 clean 开头
             offset = -offset
-            degraded = np.pad(degraded, (offset, 0), mode='constant')
-        # 对齐长度
-        min_len = min(len(degraded), len(clean))
-        degraded = degraded[:min_len]
-        clean = clean[:min_len]
+            clean = clean[offset:]
+            degraded = degraded[:len(clean)]
         return degraded, clean
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -172,9 +142,11 @@ class TimbreRestoreDataset(Dataset):
         degraded = degraded[:min_len]
         clean = clean[:min_len]
 
-        # 对齐 DF 潜在延迟
-        if self.align_df_delay and self.global_offset != 0:
-            degraded, clean = self._apply_offset(degraded, clean)
+        # 对齐 DF 潜在延迟（逐样本）
+        if self.align_df_delay and self.align_max_shift > 0 and min_len > 1000:
+            offset = self._estimate_offset(clean, degraded, self.align_max_shift, self.sample_rate)
+            if offset != 0:
+                degraded, clean = self._apply_offset(degraded, clean, offset)
         
         # 随机裁剪或填充
         if len(degraded) >= self.segment_length:
@@ -226,7 +198,7 @@ class InferenceDataset(Dataset):
         if audio.ndim > 1:
             audio = audio.mean(axis=1)
         if sr != self.sample_rate:
-            audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
+            audio = soxr.resample(audio, sr, self.sample_rate, quality="HQ")
         
         audio = torch.from_numpy(audio.astype(np.float32)).unsqueeze(0)
         
@@ -242,7 +214,7 @@ def create_dataloader(
     augment: bool = True,
     shuffle: bool = True,
     align_df_delay: bool = False,
-    align_max_shift: int = 240,
+    align_max_shift: int = 1000,
     align_sample_count: int = 32,
 ) -> DataLoader:
     """创建 DataLoader"""
@@ -261,7 +233,7 @@ def create_dataloader(
         batch_size=batch_size,
         shuffle=shuffle,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=False,
         drop_last=True,
     )
 

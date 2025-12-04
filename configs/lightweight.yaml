@@ -24,7 +24,7 @@ data:
 
   val_ratio: 0.05
   align_df_delay: true
-  align_max_shift: 240
+  align_max_shift: 1000
   align_sample_count: 32
   num_workers: 2
 
