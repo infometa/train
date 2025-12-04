@@ -327,35 +327,38 @@ def run_deepfilter_batch(
 
 
 def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
-    """估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本）"""
+    """估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本），全采样精度"""
     # 静音或能量过低，直接视为无偏移
     if np.std(clean) < 1e-4 or np.std(degraded) < 1e-4:
         return 0
     if max_shift <= 0:
         return 0
-    down_factor = max(1, sample_rate // 16000)
-    clean_ds = clean[::down_factor]
-    degraded_ds = degraded[::down_factor]
-    if clean_ds.ndim > 1:
-        clean_ds = clean_ds.flatten()
-    if degraded_ds.ndim > 1:
-        degraded_ds = degraded_ds.flatten()
-    max_shift_ds = max(1, int(max_shift / down_factor))
-    max_shift_ds = min(max_shift_ds, len(clean_ds) - 1, len(degraded_ds) - 1)
-    if max_shift_ds <= 0:
+
+    # 直接用原始采样率计算互相关（无需下采样，保证样本级精度）
+    clean_ds = clean.flatten() if clean.ndim > 1 else clean
+    degraded_ds = degraded.flatten() if degraded.ndim > 1 else degraded
+
+    limit = min(len(clean_ds), len(degraded_ds)) - 1
+    real_max_shift = min(max_shift, limit)
+    if real_max_shift <= 0:
         return 0
 
     clean_ds = clean_ds - np.mean(clean_ds)
     degraded_ds = degraded_ds - np.mean(degraded_ds)
+
     corr = np.correlate(clean_ds, degraded_ds, mode='full')
-    lags = np.arange(-len(degraded_ds) + 1, len(clean_ds))
-    valid = (lags >= -max_shift_ds) & (lags <= max_shift_ds)
-    corr = corr[valid]
-    lags = lags[valid]
-    if len(lags) == 0:
+    zero_idx = len(degraded_ds) - 1  # lag=0 的位置
+    start_idx = max(0, zero_idx - real_max_shift)
+    end_idx = min(len(corr), zero_idx + real_max_shift + 1)
+    if start_idx >= end_idx:
         return 0
-    best_lag = int(lags[int(np.argmax(corr))])
-    return int(best_lag * down_factor)
+
+    search_window = corr[start_idx:end_idx]
+    best_idx_in_window = int(np.argmax(search_window))
+    best_lag_idx = start_idx + best_idx_in_window
+    best_lag = best_lag_idx - zero_idx
+
+    return int(best_lag)
 
 
 def _apply_offset(degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
