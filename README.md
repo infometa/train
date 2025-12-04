@@ -97,6 +97,59 @@ python export_onnx.py \
     --benchmark
 ```
 
+### 5. 数据集快速自检（存在性 + 对齐 + SNR）
+
+```bash
+python - <<'PY'
+import random, pathlib, numpy as np, soundfile as sf
+txt = pathlib.Path("/data/train_data_lite/train.txt")  # 换成你的 train.txt
+pairs = []
+for line in txt.read_text().splitlines():
+    if '|' not in line: continue
+    d,c = line.split('|',1)
+    pairs.append((pathlib.Path(d), pathlib.Path(c)))
+
+print("样本数:", len(pairs))
+
+# 1) 存在性与大小检查
+missing = []
+for d,c in random.sample(pairs, min(200, len(pairs))):
+    if (not d.exists()) or (not c.exists()) or d.stat().st_size < 1024 or c.stat().st_size < 1024:
+        missing.append((d,c))
+print("存在性可疑条目:", len(missing))
+
+# 2) 对齐偏移 & 长度差
+shifts = []
+len_diff = []
+for d,c in random.sample(pairs, min(100, len(pairs))):
+    x,_ = sf.read(d); y,_ = sf.read(c)
+    n = min(len(x), len(y), 48000)
+    x = x[:n]; y = y[:n]
+    corr = np.correlate(y, x, mode='full')
+    lag = np.argmax(corr) - (n-1)
+    shifts.append(lag)
+    len_diff.append(len(x)-len(y))
+print("shift_samples: mean=%.1f, min=%d, max=%d" % (np.mean(shifts), np.min(shifts), np.max(shifts)))
+print("len_diff: mean=%.1f, min=%d, max=%d" % (np.mean(len_diff), np.min(len_diff), np.max(len_diff)))
+
+# 3) SNR 粗测
+snrs = []
+for d,c in random.sample(pairs, min(100, len(pairs))):
+    x,_ = sf.read(d); y,_ = sf.read(c)
+    n = min(len(x), len(y))
+    x = x[:n]; y = y[:n]
+    nse = y - x
+    snr = 10*np.log10(np.mean(y**2)/(np.mean(nse**2)+1e-9))
+    snrs.append(snr)
+print("SNR(dB): mean=%.2f, min=%.2f, max=%.2f" % (np.mean(snrs), np.min(snrs), np.max(snrs)))
+PY
+```
+
+判定参考：
+- 存在性：缺失/零字节为 0
+- 对齐：shift 绝对值应靠近 0（<~5-10 样本），len_diff 应为 0
+- SNR：均值建议在 15~25 dB（明显低于 10 dB 需检查对齐/损坏样本）
+
 ## 训练时长估算
 
 | 配置 | 数据量 | 50 Epochs |
