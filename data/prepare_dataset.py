@@ -350,9 +350,13 @@ def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sa
     clean_ds = clean_ds - np.mean(clean_ds)
     degraded_ds = degraded_ds - np.mean(degraded_ds)
 
+    # 预加重（高通），锐化瞬态，减小峰值抖动
+    clean_filt = clean_ds[1:] - 0.97 * clean_ds[:-1]
+    degraded_filt = degraded_ds[1:] - 0.97 * degraded_ds[:-1]
+
     # 互相关，注意参数顺序：degraded 相对于 clean 的滑动
-    corr = np.correlate(degraded_ds, clean_ds, mode='full')
-    zero_idx = len(clean_ds) - 1  # lag=0 的位置
+    corr = np.correlate(degraded_filt, clean_filt, mode='full')
+    zero_idx = len(clean_filt) - 1  # lag=0 的位置
     start_idx = max(0, zero_idx - real_max_shift)
     end_idx = min(len(corr), zero_idx + real_max_shift + 1)
     if start_idx >= end_idx:
@@ -455,7 +459,8 @@ def align_after_df(
     print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={worker_count}")
     
     MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
-    MIN_CORR = 0.8          # 归一化互相关阈值，过滤 DF 失败或静音样本
+    # 提高相关性门槛，进一步剔除对齐质量欠佳的样本，避免留下少量大偏移的长尾
+    MIN_CORR = 0.85         # 归一化互相关阈值，过滤 DF 失败或静音样本
 
     tasks = []
     for p in files:
