@@ -102,33 +102,39 @@ class MemoryTimbreDataset(Dataset):
 
     @staticmethod
     def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
-        if max_shift <= 0 or len(clean) < 1000 or len(degraded) < 1000:
+        """
+        与 prepare_dataset.py 保持一致的全精度对齐：
+        - 无下采样，样本级精度
+        - degraded 在 clean 上滑动，degraded 滞后时返回正 offset
+        """
+        if np.std(clean) < 1e-4 or np.std(degraded) < 1e-4:
             return 0
-        down = max(1, sample_rate // 12000)
-        c_ds = clean[::down]
-        d_ds = degraded[::down]
-        max_ds = max(1, int(max_shift / down))
-        max_ds = min(max_ds, len(c_ds) - 1, len(d_ds) - 1)
-        if max_ds <= 0:
+        if max_shift <= 0:
             return 0
-        best_lag = 0
-        best_score = -np.inf
-        for lag in range(-max_ds, max_ds + 1):
-            if lag >= 0:
-                c = c_ds[: len(c_ds) - lag]
-                d = d_ds[lag:]
-            else:
-                c = c_ds[-lag:]
-                d = d_ds[: len(d_ds) + lag]
-            if len(c) == 0 or len(d) == 0:
-                continue
-            c_norm = c / (np.linalg.norm(c) + 1e-8)
-            d_norm = d / (np.linalg.norm(d) + 1e-8)
-            score = float(np.dot(c_norm, d_norm))
-            if score > best_score:
-                best_score = score
-                best_lag = lag
-        return int(best_lag * down)
+
+        clean_ds = clean.flatten() if clean.ndim > 1 else clean
+        degraded_ds = degraded.flatten() if degraded.ndim > 1 else degraded
+
+        limit = min(len(clean_ds), len(degraded_ds)) - 1
+        real_max_shift = min(max_shift, limit)
+        if real_max_shift <= 0:
+            return 0
+
+        clean_ds = clean_ds - np.mean(clean_ds)
+        degraded_ds = degraded_ds - np.mean(degraded_ds)
+
+        corr = np.correlate(degraded_ds, clean_ds, mode="full")
+        zero_idx = len(clean_ds) - 1
+        start_idx = max(0, zero_idx - real_max_shift)
+        end_idx = min(len(corr), zero_idx + real_max_shift + 1)
+        if start_idx >= end_idx:
+            return 0
+
+        search_window = corr[start_idx:end_idx]
+        best_idx_in_window = int(np.argmax(search_window))
+        best_lag_idx = start_idx + best_idx_in_window
+        best_lag = best_lag_idx - zero_idx
+        return int(best_lag)
 
     def _apply_offset(self, degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
         if offset == 0:
