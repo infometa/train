@@ -26,8 +26,8 @@ data:
   segment_length: 24000  # 0.5秒，减轻RNN展开长度
   save_segment_length: 48000  # 保存 1秒片段，避免丢弃短音频，提升样本量
   segment_hop: 24000     # 生成阶段多片段切分步长（0.5秒）
-  snr_range: [5, 30]     # 信噪比范围 (dB)，覆盖低 SNR
-  noise_prob: 0.9        # 加噪概率，保留少量纯净样本
+  snr_range: [10, 30]    # 提升下限，聚焦高质量修复场景
+  noise_prob: 0.85       # 略增加纯净样本占比，避免全是重噪声
   ir_prob: 0.7           # 添加混响的概率
   
   # 数据集比例
