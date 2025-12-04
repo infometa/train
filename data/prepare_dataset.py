@@ -537,19 +537,18 @@ def main():
 
     # 确保分片前顺序一致（避免并行重复/遗漏）
     clean_files = sorted(clean_files)
-    
     print(f"Total: {len(clean_files)} files")
     if len(clean_files) == 0:
         raise SystemExit("未找到任何干净音频，请检查 vctk_path/aishell3_path 配置和路径权限。")
 
-    # 分片处理（多进程/多机并行使用）
-    if args.shard_count > 1:
-        shard_files = []
-        for i, p in enumerate(clean_files):
-            if i % args.shard_count == args.shard_idx:
-                shard_files.append(p)
-        clean_files = shard_files
-        print(f"Shard {args.shard_idx}/{args.shard_count} -> {len(clean_files)} files")
+    # === 使用全局索引避免分片/多进程时文件名冲突 ===
+    files_to_process: List[Tuple[int, Path]] = []
+    for global_idx, p in enumerate(clean_files):
+        if args.shard_count > 1:
+            if global_idx % args.shard_count != args.shard_idx:
+                continue
+        files_to_process.append((global_idx, p))
+    print(f"Shard {args.shard_idx}/{args.shard_count} -> {len(files_to_process)} files")
     
     # 加载 IR 和噪声
     print("Loading IR files (paths only)...")
@@ -584,8 +583,8 @@ def main():
     }
     
     tasks = [
-        (i, path, clean_dir, noisy_dir, irs, noise, process_config, args.skip_existing)
-        for i, path in enumerate(clean_files)
+        (global_idx, path, clean_dir, noisy_dir, irs, noise, process_config, args.skip_existing)
+        for global_idx, path in files_to_process
     ]
     
     # 随机打乱
