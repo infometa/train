@@ -317,6 +317,73 @@ def run_deepfilter_batch(
     return failed
 
 
+def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
+    """估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本）"""
+    if max_shift <= 0:
+        return 0
+    down_factor = max(1, sample_rate // 16000)
+    clean_ds = clean[::down_factor]
+    degraded_ds = degraded[::down_factor]
+    max_shift_ds = max(1, int(max_shift / down_factor))
+    max_shift_ds = min(max_shift_ds, len(clean_ds) - 1, len(degraded_ds) - 1)
+    if max_shift_ds <= 0:
+        return 0
+
+    clean_ds = clean_ds - np.mean(clean_ds)
+    degraded_ds = degraded_ds - np.mean(degraded_ds)
+    corr = np.correlate(clean_ds, degraded_ds, mode='full')
+    lags = np.arange(-len(degraded_ds) + 1, len(clean_ds))
+    valid = (lags >= -max_shift_ds) & (lags <= max_shift_ds)
+    corr = corr[valid]
+    lags = lags[valid]
+    if len(lags) == 0:
+        return 0
+    best_lag = int(lags[int(np.argmax(corr))])
+    return int(best_lag * down_factor)
+
+
+def _apply_offset(degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple[np.ndarray, np.ndarray]:
+    """应用偏移并裁剪到相同长度"""
+    if offset > 0:
+        degraded = degraded[offset:]
+        clean = clean[:len(degraded)]
+    elif offset < 0:
+        clean = clean[-offset:]
+        degraded = degraded[:len(clean)]
+    min_len = min(len(degraded), len(clean))
+    return degraded[:min_len], clean[:min_len]
+
+
+def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_shift: int = 1200):
+    """DF 处理后对齐 degraded 与 clean（就地覆盖 degraded）"""
+    files = sorted(degraded_dir.glob("*.wav"))
+    if not files:
+        return
+    print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples")
+    bad = 0
+    for p in tqdm(files):
+        clean_path = clean_dir / p.name
+        if not clean_path.exists():
+            bad += 1
+            continue
+        try:
+            deg, sr = sf.read(p)
+            cln, sr2 = sf.read(clean_path)
+            if sr != sr2:
+                deg = load_audio_file(p, sample_rate)[0]
+                cln = load_audio_file(clean_path, sample_rate)[0]
+            offset = _estimate_offset(cln, deg, max_shift, sample_rate)
+            if offset != 0:
+                deg, cln = _apply_offset(deg, cln, offset)
+                sf.write(p, deg, sample_rate, format="WAV")
+                sf.write(clean_path, cln, sample_rate, format="WAV")
+        except Exception as e:
+            bad += 1
+            print(f"[align] Error aligning {p}: {e}")
+    if bad:
+        print(f"[align] Skipped/failed: {bad} files")
+
+
 def main():
     parser = argparse.ArgumentParser(description="准备音色修复训练数据")
     parser.add_argument("--config", type=str, default="configs/default.yaml")
@@ -477,6 +544,9 @@ def main():
     # 运行 DeepFilterNet
     if not args.skip_df:
         failed_df = run_deepfilter_batch(noisy_dir, degraded_dir, skip_existing=args.skip_existing)
+        # DF 之后对齐 degraded 与 clean
+        align_max_shift = data_config.get('align_max_shift', 1200)
+        align_after_df(clean_dir, degraded_dir, data_config['sample_rate'], align_max_shift)
     else:
         print("Skipping DeepFilterNet processing (--skip_df)")
         # 复制 noisy 到 degraded（调试用）
