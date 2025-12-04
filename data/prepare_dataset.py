@@ -395,16 +395,6 @@ def _align_worker(args):
         cln, _ = load_audio_file(clean_path, sample_rate)
 
         offset = _estimate_offset(cln, deg, max_shift, sample_rate)
-        # 如果偏移为 0 或绝对值过大，视为对齐失败，直接丢弃
-        if offset == 0 or abs(offset) > 5:
-            stats["dropped_corr"] = 1
-            try:
-                p.unlink(missing_ok=True)
-                clean_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return stats
-
         if offset != 0:
             deg, cln = _apply_offset(deg, cln, offset)
 
@@ -445,7 +435,13 @@ def _align_worker(args):
     return stats
 
 
-def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_shift: int = 1200):
+def align_after_df(
+    clean_dir: Path,
+    degraded_dir: Path,
+    sample_rate: int,
+    max_shift: int = 1200,
+    num_workers: Optional[int] = None,
+):
     """
     DF 处理后对齐 degraded 与 clean（就地覆盖 degraded/clean）
     增强版：增加质量门控（长度/相关性）与安全写入，自动删除低质量样本，并支持多进程并行
@@ -454,11 +450,12 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
     if not files:
         return
     # 默认用 CPU 多进程并行
-    num_workers = min(os.cpu_count() or 1, 16)
-    print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={num_workers}")
+    max_cpu_workers = min(os.cpu_count() or 1, 16)
+    worker_count = num_workers if num_workers and num_workers > 0 else max_cpu_workers
+    print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={worker_count}")
     
     MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
-    MIN_CORR = 0.75         # 归一化互相关阈值，过滤 DF 失败或静音样本
+    MIN_CORR = 0.8          # 归一化互相关阈值，过滤 DF 失败或静音样本
 
     tasks = []
     for p in files:
@@ -466,9 +463,9 @@ def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_sh
         tasks.append((p, clean_path, sample_rate, max_shift, MIN_LEN, MIN_CORR))
 
     stats = {"processed": 0, "success": 0, "dropped_len": 0, "dropped_corr": 0, "errors": 0}
-    chunksize = max(1, len(tasks) // max(1, num_workers * 4))
+    chunksize = max(1, len(tasks) // max(1, worker_count * 4))
 
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
         for res in tqdm(executor.map(_align_worker, tasks, chunksize=chunksize), total=len(tasks)):
             for k in stats:
                 stats[k] += res.get(k, 0)
@@ -642,7 +639,7 @@ def main():
         failed_df = run_deepfilter_batch(noisy_dir, degraded_dir, skip_existing=args.skip_existing)
         # DF 之后对齐 degraded 与 clean
         align_max_shift = data_config.get('align_max_shift', 1200)
-        align_after_df(clean_dir, degraded_dir, data_config['sample_rate'], align_max_shift)
+        align_after_df(clean_dir, degraded_dir, data_config['sample_rate'], align_max_shift, args.num_workers)
     else:
         print("Skipping DeepFilterNet processing (--skip_df)")
         # 复制 noisy 到 degraded（调试用）
