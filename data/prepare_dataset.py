@@ -327,7 +327,11 @@ def run_deepfilter_batch(
 
 
 def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
-    """估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本），全采样精度"""
+    """
+    估计单条样本的相对偏移（degraded 相对于 clean 的延迟，单位：样本），全采样精度
+    关键修复：互相关参数顺序使用 (degraded, clean)，确保“degraded 滞后”返回正 offset，
+    与 _apply_offset 中的逻辑一致（offset>0 时裁剪 degraded 开头）。
+    """
     # 静音或能量过低，直接视为无偏移
     if np.std(clean) < 1e-4 or np.std(degraded) < 1e-4:
         return 0
@@ -346,8 +350,9 @@ def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sa
     clean_ds = clean_ds - np.mean(clean_ds)
     degraded_ds = degraded_ds - np.mean(degraded_ds)
 
-    corr = np.correlate(clean_ds, degraded_ds, mode='full')
-    zero_idx = len(degraded_ds) - 1  # lag=0 的位置
+    # 互相关，注意参数顺序：degraded 相对于 clean 的滑动
+    corr = np.correlate(degraded_ds, clean_ds, mode='full')
+    zero_idx = len(clean_ds) - 1  # lag=0 的位置
     start_idx = max(0, zero_idx - real_max_shift)
     end_idx = min(len(corr), zero_idx + real_max_shift + 1)
     if start_idx >= end_idx:
@@ -377,73 +382,87 @@ def _apply_offset(degraded: np.ndarray, clean: np.ndarray, offset: int) -> Tuple
     return degraded[:min_len], clean[:min_len]
 
 
+def _align_worker(args):
+    """对齐单个文件的独立进程函数"""
+    p, clean_path, sample_rate, max_shift, MIN_LEN, MIN_CORR = args
+    stats = {"processed": 1, "success": 0, "dropped_len": 0, "dropped_corr": 0, "errors": 0}
+    try:
+        if not clean_path.exists():
+            stats["errors"] = 1
+            return stats
+
+        deg, _ = load_audio_file(p, sample_rate)
+        cln, _ = load_audio_file(clean_path, sample_rate)
+
+        offset = _estimate_offset(cln, deg, max_shift, sample_rate)
+        if offset != 0:
+            deg, cln = _apply_offset(deg, cln, offset)
+
+        min_len = min(len(deg), len(cln))
+        if min_len < MIN_LEN:
+            stats["dropped_len"] = 1
+            try:
+                p.unlink(missing_ok=True)
+                clean_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return stats
+
+        deg = deg[:min_len]
+        cln = cln[:min_len]
+
+        norm_deg = np.linalg.norm(deg) + 1e-9
+        norm_cln = np.linalg.norm(cln) + 1e-9
+        score = float(np.dot(deg, cln) / (norm_deg * norm_cln))
+        if score < MIN_CORR:
+            stats["dropped_corr"] = 1
+            try:
+                p.unlink(missing_ok=True)
+                clean_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return stats
+
+        tmp_p = str(p) + ".tmp"
+        tmp_c = str(clean_path) + ".tmp"
+        sf.write(tmp_p, deg, sample_rate, format="WAV")
+        sf.write(tmp_c, cln, sample_rate, format="WAV")
+        os.replace(tmp_p, p)
+        os.replace(tmp_c, clean_path)
+        stats["success"] = 1
+    except Exception:
+        stats["errors"] = 1
+    return stats
+
+
 def align_after_df(clean_dir: Path, degraded_dir: Path, sample_rate: int, max_shift: int = 1200):
     """
     DF 处理后对齐 degraded 与 clean（就地覆盖 degraded/clean）
-    增强版：增加质量门控（长度/相关性）与安全写入，自动删除低质量样本
+    增强版：增加质量门控（长度/相关性）与安全写入，自动删除低质量样本，并支持多进程并行
     """
     files = sorted(degraded_dir.glob("*.wav"))
     if not files:
         return
-    print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples")
+    # 默认用 CPU 多进程并行
+    num_workers = min(os.cpu_count() or 1, 16)
+    print(f"[align] Aligning DF outputs: {len(files)} files, max_shift={max_shift} samples, workers={num_workers}")
     
     MIN_LEN = 2048          # 防止极短片段导致 STFT 崩溃
     MIN_CORR = 0.4          # 归一化互相关阈值，过滤 DF 失败或静音样本
-    stats = {"processed": 0, "success": 0, "dropped_len": 0, "dropped_corr": 0, "errors": 0}
-    
-    for p in tqdm(files):
-        stats["processed"] += 1
+
+    tasks = []
+    for p in files:
         clean_path = clean_dir / p.name
-        if not clean_path.exists():
-            stats["errors"] += 1
-            continue
-        try:
-            deg, _ = load_audio_file(p, sample_rate)
-            cln, _ = load_audio_file(clean_path, sample_rate)
-            
-            # 应用偏移
-            offset = _estimate_offset(cln, deg, max_shift, sample_rate)
-            if offset != 0:
-                deg, cln = _apply_offset(deg, cln, offset)
-            
-            # 长度检查
-            min_len = min(len(deg), len(cln))
-            if min_len < MIN_LEN:
-                stats["dropped_len"] += 1
-                try:
-                    p.unlink(missing_ok=True)
-                    clean_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                continue
-            deg = deg[:min_len]
-            cln = cln[:min_len]
-            
-            # 相关性检查（归一化点积）
-            norm_deg = np.linalg.norm(deg) + 1e-9
-            norm_cln = np.linalg.norm(cln) + 1e-9
-            score = float(np.dot(deg, cln) / (norm_deg * norm_cln))
-            if score < MIN_CORR:
-                stats["dropped_corr"] += 1
-                try:
-                    p.unlink(missing_ok=True)
-                    clean_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
-                continue
-            
-            # 安全写入：先写 tmp 再原子替换
-            tmp_p = str(p) + ".tmp"
-            tmp_c = str(clean_path) + ".tmp"
-            sf.write(tmp_p, deg, sample_rate, format="WAV")
-            sf.write(tmp_c, cln, sample_rate, format="WAV")
-            os.replace(tmp_p, p)
-            os.replace(tmp_c, clean_path)
-            stats["success"] += 1
-        except Exception as e:
-            stats["errors"] += 1
-            print(f"[align] Error aligning {p}: {e}")
-    
+        tasks.append((p, clean_path, sample_rate, max_shift, MIN_LEN, MIN_CORR))
+
+    stats = {"processed": 0, "success": 0, "dropped_len": 0, "dropped_corr": 0, "errors": 0}
+    chunksize = max(1, len(tasks) // max(1, num_workers * 4))
+
+    with ProcessPoolExecutor(max_workers=num_workers) as executor:
+        for res in tqdm(executor.map(_align_worker, tasks, chunksize=chunksize), total=len(tasks)):
+            for k in stats:
+                stats[k] += res.get(k, 0)
+
     print("\n[align] Quality Report:")
     print(f"  Processed   : {stats['processed']}")
     print(f"  Success     : {stats['success']}")
