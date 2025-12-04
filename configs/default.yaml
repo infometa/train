@@ -38,8 +38,8 @@ data:
   # 数据划分
   val_ratio: 0.05
 
-  # DF 引入的潜在延迟对齐（样本级，全局估计）
-  align_df_delay: true
+  # DF 引入的潜在延迟对齐（生成阶段已对齐，训练阶段关闭二次对齐）
+  align_df_delay: false
   align_max_shift: 4000     # 最大估计偏移（样本），约 83ms，避免误对齐
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   

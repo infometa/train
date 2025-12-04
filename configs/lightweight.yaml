@@ -23,7 +23,8 @@ data:
     aishell3: 0.7
 
   val_ratio: 0.05
-  align_df_delay: true
+  # 生成阶段已对齐（align_after_df），训练阶段关闭二次对齐
+  align_df_delay: false
   align_max_shift: 4000
   align_sample_count: 32
   num_workers: 2            # shm 受限默认 2，可视资源再调高
