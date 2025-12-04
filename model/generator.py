@@ -334,7 +334,7 @@ class CausalUNetGenerator(nn.Module):
         
         # 残差缩放因子（可学习），初始化为较小值避免初期扰动过大
         # 模型输出 = 输入 + residual_scale * 网络输出
-        self.residual_scale = nn.Parameter(torch.ones(1) * 0.1)
+        self.residual_scale = nn.Parameter(torch.ones(1) * 0.3)
     
     def forward(self, x: torch.Tensor, rnn_state: Optional[torch.Tensor] = None, return_state: bool = False):
         """
@@ -385,10 +385,10 @@ class CausalUNetGenerator(nn.Module):
         
         # ========== 核心改进：残差学习 + 静音门控 ==========
         # 更平滑的门控，避免过度抑制低音量段
-        gate = torch.sigmoid(torch.abs(residual) * 10.0)
+        gate = torch.sigmoid(torch.abs(residual) * 6.0)
         x = residual + self.residual_scale * x * gate
         # 温和软限制，降低压缩强度
-        x = x / (1.0 + 0.02 * torch.abs(x))
+        x = x / (1.0 + 0.01 * torch.abs(x))
         if not self.training:
             x = torch.clamp(x, -1.0, 1.0)
         # =========================================

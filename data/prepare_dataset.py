@@ -154,8 +154,8 @@ def add_noise(audio: np.ndarray, noise: np.ndarray, snr_db: float) -> np.ndarray
     noise_gain = np.sqrt(audio_power / (noise_power * snr_linear))
     
     noisy = audio + noise_gain * noise_segment
-    # 软削波/裁剪，尽量不破坏 SNR
-    noisy = np.clip(noisy, -1.0, 1.0)
+    # 软限制，尽量保持相对能量关系
+    noisy = np.tanh(noisy * 0.95) / 0.95
     return noisy.astype(np.float32)
 
 

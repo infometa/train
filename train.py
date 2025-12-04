@@ -231,8 +231,8 @@ class Trainer:
         train_config = self.config['training']
 
         align_df_delay = data_config.get('align_df_delay', False)
-        # 与配置保持一致，覆盖 DeepFilterNet 可能的 80ms+ 延迟
-        align_max_shift = data_config.get('align_max_shift', 4000)
+        # 与配置保持一致，覆盖 DeepFilterNet 可能的较大延迟
+        align_max_shift = data_config.get('align_max_shift', 8000)
         align_sample_count = data_config.get('align_sample_count', 32)
         
         output_dir = Path(data_config['output_dir'])
@@ -410,9 +410,6 @@ class Trainer:
             
             if use_gan:
                 fake_out, fake_feats = self.discriminator(fake)
-                with torch.no_grad():
-                    _, real_feats = self.discriminator(clean)
-                
                 g_loss, g_losses = self.g_loss_fn(
                     fake, clean,
                     disc_fake_outputs=fake_out,
@@ -453,8 +450,8 @@ class Trainer:
             fake = self.generator(degraded)
 
             if use_gan:
+                real_out, real_feats = self.discriminator(clean)
                 fake_out, fake_feats = self.discriminator(fake)
-                _, real_feats = self.discriminator(clean)
                 loss, losses = self.g_loss_fn(
                     fake, clean,
                     disc_fake_outputs=fake_out,
@@ -587,7 +584,8 @@ class Trainer:
                 # CosineAnnealingWarmRestarts 按 step 更新
                 if not self.scheduler_step_per_epoch and num_batches > 0:
                     if self.enable_scheduler:
-                        step_frac = epoch + batch_idx / num_batches
+                        # 让调度在 warmup 结束后从 0 开始累计
+                        step_frac = max(0, epoch - self.warmup_epochs) + batch_idx / num_batches
                         self.scheduler_g.step(step_frac)
                         self.scheduler_d.step(step_frac)
             

@@ -83,7 +83,9 @@ class TimbreRestoreDataset(Dataset):
 
     @staticmethod
     def _estimate_offset(clean: np.ndarray, degraded: np.ndarray, max_shift: int, sample_rate: int) -> int:
-        """估计单个样本对的相对偏移（degraded 相对于 clean 的延迟，单位：样本），使用 FFT 互相关"""
+        """估计单个样本对的相对偏移（degraded 相对于 clean 的延迟，单位：样本）
+        使用简化互相关，限制搜索窗口，避免 FFT 引入的索引偏移。
+        """
         if max_shift <= 0:
             return 0
         # 下采样以降低计算成本（目标 ~16kHz）
@@ -99,20 +101,14 @@ class TimbreRestoreDataset(Dataset):
         clean_ds = clean_ds - np.mean(clean_ds)
         degraded_ds = degraded_ds - np.mean(degraded_ds)
 
-        n = len(clean_ds)
-        m = len(degraded_ds)
-        size = 1 << int(np.ceil(np.log2(n + m - 1)))
-        fft_clean = np.fft.rfft(clean_ds, size)
-        fft_deg = np.fft.rfft(degraded_ds, size)
-        corr = np.fft.irfft(fft_clean * np.conj(fft_deg), size)
-
-        lags = np.arange(- (m - 1), n)
-        # 限制到 ±max_shift_ds
+        # 直接互相关并限制窗口
+        corr = np.correlate(clean_ds, degraded_ds, mode='full')
+        lags = np.arange(-len(degraded_ds) + 1, len(clean_ds))
         valid = (lags >= -max_shift_ds) & (lags <= max_shift_ds)
-        if not np.any(valid):
-            return 0
-        corr = corr[:len(lags)][valid]
+        corr = corr[valid]
         lags = lags[valid]
+        if len(lags) == 0:
+            return 0
 
         best_idx = int(np.argmax(corr))
         best_lag = int(lags[best_idx])
@@ -155,9 +151,14 @@ class TimbreRestoreDataset(Dataset):
         # 裁剪或填充（对齐后长度可能略短）
         current_len = len(degraded)
         if current_len >= self.segment_length:
-            # 为保持对齐，固定从头裁剪
-            degraded = degraded[:self.segment_length]
-            clean = clean[:self.segment_length]
+            # 为保持对齐，同时引入轻微随机性（最多偏移 500 样本或剩余空间）
+            if self.augment:
+                max_start = max(0, min(500, current_len - self.segment_length))
+                start = random.randint(0, max_start) if max_start > 0 else 0
+            else:
+                start = 0
+            degraded = degraded[start:start + self.segment_length]
+            clean = clean[start:start + self.segment_length]
         elif current_len >= int(self.segment_length * 0.9):
             # 略短于目标长度：居中并用反射填充两侧，避免大块零
             deficit = self.segment_length - current_len
@@ -175,7 +176,8 @@ class TimbreRestoreDataset(Dataset):
         if self.augment:
             # 温和增益（约 ±1dB）
             gain = random.uniform(0.9, 1.1)
-            degraded = degraded * gain  # 仅对 degraded 增益，保持 target 不变
+            degraded = degraded * gain
+            clean = clean * gain
         
         # 转为 Tensor [1, T]
         degraded = torch.from_numpy(degraded.astype(np.float32)).unsqueeze(0)

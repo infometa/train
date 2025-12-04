@@ -25,7 +25,7 @@ class MultiResolutionSTFTLoss(nn.Module):
         win_lengths: List[int] = [512, 1024, 2048],
         window: str = "hann",
         sample_rate: int = 48000,
-        hf_weight: float = 1.5,      # 高频加权倍数
+        hf_weight: float = 2.0,      # 高频加权倍数
         hf_cutoff: int = 3000,       # 高频起始频率 (Hz)
     ):
         super().__init__()
@@ -36,6 +36,9 @@ class MultiResolutionSTFTLoss(nn.Module):
         self.sample_rate = sample_rate
         self.hf_weight = hf_weight
         self.hf_cutoff = hf_cutoff
+        # 预计算各个 FFT 分辨率的高频权重，缓存为 buffer，避免每步重新构建 tensor
+        self.register_buffer("_freq_weight_cache_ready", torch.tensor(1), persistent=False)
+        self.freq_weight_cache = nn.ParameterDict()
         
         # 预计算窗函数
         self.windows = nn.ParameterList()
@@ -47,20 +50,33 @@ class MultiResolutionSTFTLoss(nn.Module):
             else:
                 win = torch.ones(win_length)
             self.windows.append(nn.Parameter(win, requires_grad=False))
-    
-    def _get_frequency_weight(self, freq_bins: int, fft_size: int, device: torch.device) -> torch.Tensor:
-        """生成频率加权向量（高频平滑过渡，sigmoid）"""
-        weight = torch.ones(freq_bins, device=device)
         
+        # 预缓存频率权重
+        for fft_size in fft_sizes:
+            freq_bins = fft_size // 2 + 1
+            weight = self._compute_frequency_weight(freq_bins, fft_size)
+            self.freq_weight_cache[str(fft_size)] = nn.Parameter(weight, requires_grad=False)
+    
+    def _compute_frequency_weight(self, freq_bins: int, fft_size: int) -> torch.Tensor:
+        """生成频率加权向量（高频平滑过渡，sigmoid），用于初始化缓存"""
+        weight = torch.ones(freq_bins)
         hf_start_bin = int(self.hf_cutoff * fft_size / self.sample_rate)
         if hf_start_bin < freq_bins:
-            bins = torch.arange(freq_bins, device=device, dtype=torch.float32)
+            bins = torch.arange(freq_bins, dtype=torch.float32)
             transition_width = max(1, (freq_bins - hf_start_bin) // 4)
             sigmoid_input = (bins - hf_start_bin) / transition_width
             smooth_ramp = torch.sigmoid(sigmoid_input)
             weight = 1.0 + (self.hf_weight - 1.0) * smooth_ramp
-        
         return weight.view(1, -1, 1)  # [1, F, 1] for broadcasting
+    
+    def _get_frequency_weight(self, fft_size: int, device: torch.device) -> torch.Tensor:
+        """获取缓存的频率权重并移动到目标设备"""
+        cached = self.freq_weight_cache.get(str(fft_size), None)
+        if cached is None:
+            freq_bins = fft_size // 2 + 1
+            cached = nn.Parameter(self._compute_frequency_weight(freq_bins, fft_size), requires_grad=False)
+            self.freq_weight_cache[str(fft_size)] = cached
+        return cached.to(device)
     
     def stft_loss(
         self,
@@ -96,8 +112,7 @@ class MultiResolutionSTFTLoss(nn.Module):
         target_mag = target_stft.abs()
         
         # ========== 高频加权 ==========
-        freq_bins = pred_mag.shape[1]
-        freq_weight = self._get_frequency_weight(freq_bins, fft_size, pred.device)
+        freq_weight = self._get_frequency_weight(fft_size, pred.device)
         
         # 应用加权
         pred_mag_weighted = pred_mag * freq_weight
@@ -225,7 +240,7 @@ class GeneratorLoss(nn.Module):
                 'hop_sizes': [128, 256, 512],
                 'win_lengths': [512, 1024, 2048],
                 'sample_rate': 48000,
-                'hf_weight': 1.5,      # 高频加权
+                'hf_weight': 2.0,      # 高频加权
                 'hf_cutoff': 3000,     # 3kHz 以上
             }
         self.stft_loss = MultiResolutionSTFTLoss(**stft_config)
