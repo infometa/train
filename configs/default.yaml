@@ -44,7 +44,7 @@ data:
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader
-  num_workers: 0            # 避免 shm/文件系统共享问题，单进程加载
+  num_workers: 2            # 适度并行，若有 shm 问题再调低
 
 # 模型配置
 model:
@@ -89,10 +89,10 @@ training:
   
   # ========== 核心修改：损失权重 ==========
   loss_weights:
-    l1: 5.0              # 降低时域权重
-    multi_stft: 5.0      # 提升频域权重
-    adversarial: 0.5     # 适当减弱 GAN
-    feature_matching: 1.5 # 减弱 FM 稳定收敛
+    l1: 3.0
+    multi_stft: 3.0
+    adversarial: 1.0
+    feature_matching: 2.0
   # ========================================
   
   # Multi-Resolution STFT Loss（带高频加权）
@@ -101,7 +101,7 @@ training:
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    hf_weight: 2.0       # 高频加权倍数
+    hf_weight: 1.5       # 高频加权倍数
     hf_cutoff: 3000      # 高频起始频率 (Hz)
   
   # 训练策略

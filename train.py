@@ -280,7 +280,7 @@ class Trainer:
             shuffle=(train_sampler is None),
             sampler=train_sampler,
             num_workers=data_config['num_workers'],
-            pin_memory=False,
+            pin_memory=True if self.device.type == 'cuda' else False,
             persistent_workers=False,
             prefetch_factor=1,
             drop_last=True,
@@ -292,7 +292,7 @@ class Trainer:
             shuffle=False,
             sampler=None,  # 验证集不分片，确保所有进程（或主进程）看到完整验证集
             num_workers=data_config['num_workers'],
-            pin_memory=False,
+            pin_memory=True if self.device.type == 'cuda' else False,
             persistent_workers=False,
             prefetch_factor=1,
             drop_last=False,

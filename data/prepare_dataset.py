@@ -167,10 +167,10 @@ def process_with_deepfilter(audio: np.ndarray, sr: int, df_model, df_state) -> n
 
 
 def process_single_file(
-    args: Tuple[int, Path, Path, Path, List[Path], List[Path], dict]
+    args: Tuple[int, Path, Path, Path, List[Path], List[Path], dict, bool]
 ) -> Optional[dict]:
     """处理单个文件（用于多进程）"""
-    idx, clean_path, output_clean_dir, output_degraded_dir, irs, noise, config = args
+    idx, clean_path, output_clean_dir, output_degraded_dir, irs, noise, config, skip_existing = args
     
     try:
         target_sr = config['sample_rate']
@@ -241,6 +241,10 @@ def process_single_file(
             file_id = f"{idx:08d}_{seg_idx:02d}"
             clean_out = output_clean_dir / f"{file_id}.wav"
             degraded_out = output_degraded_dir / f"{file_id}.wav"
+
+            # 已存在则跳过（支持分片/断点续跑）
+            if skip_existing and clean_out.exists() and degraded_out.exists():
+                continue
             
             # 保存（这里保存的是加噪版本，后续批量过 DF）
             sf.write(clean_out, clean_seg, target_sr)
@@ -264,7 +268,8 @@ def process_single_file(
 def run_deepfilter_batch(
     input_dir: Path,
     output_dir: Path,
-    batch_size: int = 100
+    batch_size: int = 100,
+    skip_existing: bool = False
 ) -> List[str]:
     """批量运行 DeepFilterNet"""
     if not DF_AVAILABLE:
@@ -282,6 +287,8 @@ def run_deepfilter_batch(
     
     for i, input_path in enumerate(tqdm(input_files)):
         output_path = output_dir / input_path.name
+        if skip_existing and output_path.exists():
+            continue
         
         audio = None  # keep for fallback save
         sr = df_state.sr()
@@ -303,6 +310,9 @@ def main():
     parser.add_argument("--num_workers", type=int, default=24)
     parser.add_argument("--max_files", type=int, default=None, help="限制处理文件数（调试用）")
     parser.add_argument("--skip_df", action="store_true", help="跳过 DeepFilterNet 处理")
+    parser.add_argument("--skip_existing", action="store_true", help="已存在文件跳过，便于断点续跑/并行分片")
+    parser.add_argument("--shard_idx", type=int, default=0, help="分片索引，从 0 开始")
+    parser.add_argument("--shard_count", type=int, default=1, help="分片总数，用于多进程/多机并行")
     args = parser.parse_args()
     
     # 加载配置
@@ -380,6 +390,15 @@ def main():
     print(f"Total: {len(clean_files)} files")
     if len(clean_files) == 0:
         raise SystemExit("未找到任何干净音频，请检查 vctk_path/aishell3_path 配置和路径权限。")
+
+    # 分片处理（多进程/多机并行使用）
+    if args.shard_count > 1:
+        shard_files = []
+        for i, p in enumerate(clean_files):
+            if i % args.shard_count == args.shard_idx:
+                shard_files.append(p)
+        clean_files = shard_files
+        print(f"Shard {args.shard_idx}/{args.shard_count} -> {len(clean_files)} files")
     
     # 加载 IR 和噪声
     print("Loading IR files (paths only)...")
@@ -414,7 +433,7 @@ def main():
     }
     
     tasks = [
-        (i, path, clean_dir, noisy_dir, irs, noise, process_config)
+        (i, path, clean_dir, noisy_dir, irs, noise, process_config, args.skip_existing)
         for i, path in enumerate(clean_files)
     ]
     
@@ -422,7 +441,7 @@ def main():
     random.shuffle(tasks)
     
     # 多进程处理
-    print(f"Processing with {args.num_workers} workers...")
+    print(f"Processing with {args.num_workers} workers... (skip_existing={args.skip_existing})")
     results = []
     
     with ProcessPoolExecutor(max_workers=args.num_workers) as executor:
@@ -441,7 +460,7 @@ def main():
     failed_df: List[str] = []
     # 运行 DeepFilterNet
     if not args.skip_df:
-        failed_df = run_deepfilter_batch(noisy_dir, degraded_dir)
+        failed_df = run_deepfilter_batch(noisy_dir, degraded_dir, skip_existing=args.skip_existing)
     else:
         print("Skipping DeepFilterNet processing (--skip_df)")
         # 复制 noisy 到 degraded（调试用）

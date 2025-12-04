@@ -37,15 +37,37 @@ data:
     aishell3: 0.7
 ```
 
-运行数据准备：
+运行数据准备（支持分片并行 + 断点续跑）：
 
 ```bash
 # 小规模调试（随机抽样 200 条，跳过 DF 加速）
-python data/prepare_dataset.py --config configs/default.yaml --max_files 200 --skip_df
+python data/prepare_dataset.py \
+  --config configs/default.yaml \
+  --max_files 200 \
+  --skip_df \
+  --skip_existing
 
-# 全量
-python data/prepare_dataset.py --config configs/default.yaml
+# 全量单进程（默认 24 worker，在进程内并行切片）
+python data/prepare_dataset.py \
+  --config configs/default.yaml \
+  --skip_existing
+
+# 全量分片并行（4 进程/4 卡示例）
+for i in 0 1 2 3; do
+  CUDA_VISIBLE_DEVICES=$i \
+  python data/prepare_dataset.py \
+    --config configs/default.yaml \
+    --shard-idx $i --shard-count 4 \
+    --skip_existing \
+    --num_workers 12 &
+done
+wait
 ```
+
+关键参数：
+- `--skip_existing` 已存在的 clean/degraded 直接跳过，便于断点续跑/多机多进程并行。
+- `--shard-idx/--shard-count` 分片跑，不同进程/机器用不同的 shard-idx。
+- `--max_files` 仅用于抽样调试。
 
 ### 3. 训练
 

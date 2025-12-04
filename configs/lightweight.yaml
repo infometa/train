@@ -26,7 +26,7 @@ data:
   align_df_delay: true
   align_max_shift: 2000
   align_sample_count: 32
-  num_workers: 0
+  num_workers: 2
 
 model:
   name: "CausalUNetGAN_Lite"
@@ -59,16 +59,16 @@ training:
     eta_min: 1.0e-6
     warmup_epochs: 5
   loss_weights:
-    l1: 5.0
-    multi_stft: 5.0
-    adversarial: 0.5
-    feature_matching: 1.5
+    l1: 3.0
+    multi_stft: 3.0
+    adversarial: 1.0
+    feature_matching: 2.0
   stft_config:
     fft_sizes: [512, 1024, 2048]
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    hf_weight: 2.0
+    hf_weight: 1.5
     hf_cutoff: 3000
   gan_start_epoch: 15
   grad_clip: 0.5

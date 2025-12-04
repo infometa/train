@@ -217,7 +217,7 @@ def create_dataloader(
     augment: bool = True,
     shuffle: bool = True,
     align_df_delay: bool = False,
-    align_max_shift: int = 1000,
+    align_max_shift: int = 2000,
     align_sample_count: int = 32,
 ) -> DataLoader:
     """创建 DataLoader"""
