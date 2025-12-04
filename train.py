@@ -25,7 +25,6 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-import torch.multiprocessing as mp
 
 import yaml
 from tqdm import tqdm
@@ -37,9 +36,6 @@ from data.dataset import TimbreRestoreDataset, create_dataloader
 from model.generator import CausalUNetGenerator, count_parameters
 from model.discriminator import MultiScaleDiscriminator
 from model.losses import GeneratorLoss, DiscriminatorLoss
-
-# 避免 /dev/shm 受限导致 DataLoader 报错，改用文件系统共享
-mp.set_sharing_strategy("file_system")
 
 
 def setup_distributed():
