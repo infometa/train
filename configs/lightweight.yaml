@@ -8,7 +8,7 @@ data:
   aishell3_path: "/data/audio/Aishell3/train/wav"
   ir_path: "/data/audio/impulse_responses/SLR26/simulated_rirs_48k"
   noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
-  output_dir: "/data/train_data_lite"
+  output_dir: "/data/train_full_clean"
 
   sample_rate: 48000
   segment_length: 24000       # 0.5 秒训练段

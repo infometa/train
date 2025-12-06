@@ -374,7 +374,8 @@ class Trainer:
         
         train_config = self.config['training']
         use_gan = self.epoch >= train_config['gan_start_epoch']
-        amp_enabled = self.device.type == 'cuda'
+        # 关闭混合精度，避免数值不稳定
+        amp_enabled = False
         
         losses = {}
         

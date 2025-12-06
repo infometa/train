@@ -17,7 +17,7 @@ data:
   noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
   
   # 输出路径
-  output_dir: "/data/train_data_lite"
+  output_dir: "/data/train_full_clean"
   
   # 采样率
   sample_rate: 48000
@@ -44,7 +44,7 @@ data:
   align_sample_count: 32    # 估计偏移时采样的样本对数量
   
   # DataLoader
-  num_workers: 2            # shm 受限时默认 2，若资源允许可在命令行调高
+  num_workers: 8           # shm 受限时默认 2，若资源允许可在命令行调高
 
 # 模型配置
 model:
@@ -69,14 +69,14 @@ model:
 
 # 训练配置
 training:
-  batch_size: 16
+  batch_size: 24
   epochs: 60
   
   # 优化器
   optimizer:
     type: "AdamW"
-    lr_g: 1.0e-4
-    lr_d: 1.0e-4
+    lr_g: 5.0e-5
+    lr_d: 5.0e-5
     betas: [0.8, 0.99]
     weight_decay: 0.01
   
@@ -106,7 +106,7 @@ training:
   
   # 训练策略
   gan_start_epoch: 10     # 略提前 GAN 启动，加速判别器收敛
-  grad_clip: 0.5
+  grad_clip: 0.1
   
   # 检查点
   save_every: 3
