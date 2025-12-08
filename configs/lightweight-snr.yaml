@@ -20,8 +20,8 @@ data:
   segment_hop: 24000
   
   # === 高质量修复策略 ===
-  snr_range: [15, 30]     # 提升下限，聚焦中高信噪比
-  noise_prob: 0.8         # 提升纯净样本占比，强化恒等映射
+  snr_range: [15, 30]     # 提升下限，聚焦中高 SNR 场景
+  noise_prob: 0.8         # 提高纯净样本占比，强化恒等映射
   ir_prob: 0.4            # 略降混响比例，减少过度去混响风险
 
   dataset_ratio:
