@@ -245,6 +245,8 @@ class CombinedDiscriminator(nn.Module):
         use_mpd: bool = True,
         msd_scales: int = 3,
         mpd_periods: List[int] = [2, 3, 5, 7, 11],
+        channels: List[int] = [64, 128, 256, 512, 1024],
+        kernel_size: int = 5,
         use_spectral_norm: bool = True,
     ):
         super().__init__()
@@ -255,12 +257,16 @@ class CombinedDiscriminator(nn.Module):
         if use_msd:
             self.msd = MultiScaleDiscriminator(
                 scales=msd_scales,
+                channels=channels,
+                kernel_size=kernel_size,
                 use_spectral_norm=use_spectral_norm
             )
         
         if use_mpd:
             self.mpd = MultiPeriodDiscriminator(
                 periods=mpd_periods,
+                channels=channels,
+                kernel_size=kernel_size,
                 use_spectral_norm=use_spectral_norm
             )
     

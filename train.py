@@ -34,7 +34,7 @@ import soundfile as sf
 sys.path.insert(0, str(Path(__file__).parent))
 from data.dataset import TimbreRestoreDataset, create_dataloader
 from model.generator import CausalUNetGenerator, count_parameters
-from model.discriminator import MultiScaleDiscriminator, MultiPeriodDiscriminator
+from model.discriminator import MultiScaleDiscriminator, MultiPeriodDiscriminator, CombinedDiscriminator
 from model.losses import GeneratorLoss, DiscriminatorLoss
 
 
@@ -133,9 +133,12 @@ class Trainer:
             use_weight_norm=gen_config['use_weight_norm'],
         ).to(self.device)
         
-        # Discriminator: 使用 Multi-Period 版本以强化高频细节判别
-        self.discriminator = MultiPeriodDiscriminator(
-            periods=disc_config.get('periods', [2, 3, 5, 7, 11]),
+        # Discriminator: 使用组合判别器（MSD + MPD），同时关注全局与周期性细节
+        self.discriminator = CombinedDiscriminator(
+            use_msd=True,
+            use_mpd=True,
+            msd_scales=disc_config.get('scales', 3),
+            mpd_periods=disc_config.get('periods', [2, 3, 5, 7, 11]),
             channels=disc_config['channels'],
             kernel_size=disc_config['kernel_size'],
             use_spectral_norm=disc_config['use_spectral_norm'],
