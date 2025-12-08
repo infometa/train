@@ -1,7 +1,7 @@
 # ===========================================
 # 轻量化均衡版配置 (Lightweight Plus / Balanced)
 # 目标: 兼顾实时性 (RTF < 0.8) 与高音质
-# 改进: 相比 Lite 版增加了通道和层数，强化高频还原
+# 改进: 相比 Lite 版增加了通道和层数，大幅提升高频还原能力
 # ===========================================
 
 data:
@@ -11,7 +11,7 @@ data:
   ir_path: "/data/audio/impulse_responses/SLR26/simulated_rirs_48k"
   noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
   
-  # 指向已清洗的全量数据集
+  # === 指向已清洗的全量数据集 ===
   output_dir: "/data/train_full_clean"
 
   sample_rate: 48000
@@ -19,10 +19,10 @@ data:
   save_segment_length: 48000  # 保存 1 秒
   segment_hop: 24000
   
-  # 高质量修复策略
-  snr_range: [12, 30]     # 聚焦中高信噪比
-  noise_prob: 0.85        # 保留 15% 纯净样本
-  ir_prob: 0.5            # 降低混响比例，避免过度去混响
+  # === 高质量修复策略 ===
+  snr_range: [12, 30]     # 聚焦中高信噪比，不练废片
+  noise_prob: 0.85        # 保留 15% 纯净样本，学习恒等映射
+  ir_prob: 0.5            # 降低混响比例，避免过度去混响导致干音失真
 
   dataset_ratio:
     vctk: 0.3
@@ -30,12 +30,12 @@ data:
 
   val_ratio: 0.05
   
-  # 数据已物理对齐，关闭二次对齐
+  # === 必须关闭二次对齐 (数据已物理对齐) ===
   align_df_delay: false
   align_max_shift: 4000
   align_sample_count: 32
   
-  # 高性能加载
+  # === 高性能加载 ===
   num_workers: 8
 
 model:
@@ -45,28 +45,29 @@ model:
   generator:
     in_channels: 1
     out_channels: 1
-    # 升级: 通道扩容 32 -> 48，整体计算量约为默认版的 ~60%
+    # [升级 1] 通道扩容: 32 -> 48 (增加 50% 容量，提升细节记忆)
     channels: [48, 96, 192, 384]
-    # 升级: 卷积核 5 -> 7，感受野更大
+    # [升级 2] 恢复大卷积: 5 -> 7 (提升感受野，改善低频连贯性)
     kernel_size: 7
     bottleneck_type: "gru"
-    # 升级: 双层 GRU
+    # [升级 3] 恢复双层 GRU: 1 -> 2 (消除时序涂抹感)
     bottleneck_layers: 2
     use_weight_norm: true
     
   # Discriminator (Multi-Scale) - 配套增强
   discriminator:
     scales: 2
-    # 判别器通道对应增加，保持对抗强度
+    # [升级] 判别器通道对应增加，保持对抗强度
     channels: [48, 96, 192, 384, 768]
     kernel_size: 5
     use_spectral_norm: true
 
 training:
-  # 模型变大，Batch Size 微调防显存溢出
+  # [调整] 模型变大，Batch Size 微调以防爆显存 (32 -> 24)
   batch_size: 24
   epochs: 80
   
+  # 优化器 (保持防崩盘设置)
   optimizer:
     type: "AdamW"
     lr_g: 5.0e-5       # 低学习率求稳
@@ -91,12 +92,14 @@ training:
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    # 高频权重加倍以强化高频细节
+    # [升级 4] 激进的高频权重: 2.0 -> 4.0
+    # 强迫模型将算力重点放在 3kHz 以上的恢复上，解决 Lite 版高频延伸不足的问题
     hf_weight: 4.0
     hf_cutoff: 3000
   
+  # 策略
   gan_start_epoch: 10
-  # 梯度裁剪防止梯度爆炸
+  # [关键] 强力梯度裁剪，防止 NaN
   grad_clip: 0.1
   
   save_every: 5
