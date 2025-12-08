@@ -532,6 +532,9 @@ def main():
         aishell_files = scan_audio_files(data_config['aishell3_path'], ['.wav'])
         print(f"  Aishell3: {len(aishell_files)} files")
 
+    # 固定随机种子，避免多分片/多进程抽样不一致导致文件覆盖
+    random.seed(42)
+
     # 固定随机种子，确保在多分片/多进程情况下抽样顺序一致，避免文件名冲突或覆盖
     random.seed(42)
     # 按比例抽取（可选）
