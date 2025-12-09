@@ -83,9 +83,9 @@ training:
     warmup_epochs: 10
   
   loss_weights:
-    l1: 2.0
-    multi_stft: 4.0
-    adversarial: 1.5
+    l1: 1.5
+    multi_stft: 5.0
+    adversarial: 1.8
     feature_matching: 2.0
   
   stft_config:
@@ -93,9 +93,9 @@ training:
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    # 高频权重：加大惩罚以追求极致高频恢复，需关注训练稳定性
-    hf_weight: 4.0
-    hf_cutoff: 3000
+    # 高频权重：温和提升，兼顾稳定性
+    hf_weight: 4.5
+    hf_cutoff: 4000
   
   # 策略
   gan_start_epoch: 12
