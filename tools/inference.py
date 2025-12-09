@@ -5,7 +5,7 @@ import time
 import numpy as np
 import soundfile as sf
 import onnxruntime as ort
-from pathlib import Path  # ✅ 修复1：移到顶部
+from pathlib import Path
 
 # 尝试导入高质量重采样库
 try:
@@ -45,7 +45,7 @@ def load_and_preprocess(path, target_sr=48000):
         
     return audio.astype(np.float32), target_sr
 
-def run_inference(model_path, audio_data):
+def run_inference(model_path, audio_data, frame_size=480, hidden_size=None, num_layers=None):
     # 根据设备选择 Provider
     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
     try:
@@ -53,38 +53,67 @@ def run_inference(model_path, audio_data):
     except Exception:
         session = ort.InferenceSession(model_path, providers=['CPUExecutionProvider'])
 
-    input_meta = session.get_inputs()
-    if len(input_meta) > 1:
-        print("❌ 错误：此脚本仅支持【非流式】模型。")
-        return None
+    inputs = session.get_inputs()
+    has_state = any(i.name == 'h_in' for i in inputs)
 
-    input_name = input_meta[0].name
+    if has_state:
+        if hidden_size is None or num_layers is None:
+            print("❌ 流式模型需要指定 --hidden-size 和 --num-layers")
+            return None
+        input_name = 'input'
+        h_name = 'h_in'
+    else:
+        input_name = inputs[0].name
+        h_name = None
     
-    print(f"Running inference on {model_path}...")
+    print(f"Running inference on {model_path}... (streaming={has_state})")
     start_time = time.time()
 
-    # ✅ 修复2：简易切片处理（防止爆内存）
-    # 如果音频超过 30秒，建议切片。这里为了简单演示，仅做提示，
-    # 真正的切片需要处理重叠(Overlap)以避免拼接处有咔哒声。
-    if len(audio_data) > 48000 * 30: 
-        print("⚠️ 警告：音频过长 (>30s)，一次性推理可能耗尽内存。建议使用流式模型或切片处理。")
+    if not has_state:
+        if len(audio_data) > 48000 * 30:
+            print("⚠️ 警告：音频过长 (>30s)，一次性推理可能耗尽内存。建议使用流式模型或切片处理。")
+        input_tensor = audio_data[np.newaxis, np.newaxis, :]
+        outputs = session.run(None, {input_name: input_tensor})
+        output_tensor = outputs[0].squeeze()
+        elapsed = time.time() - start_time
+        rtf = elapsed / (len(audio_data) / 48000)
+        print(f"  Time: {elapsed:.3f}s | RTF: {rtf:.3f}x")
+        return output_tensor
 
-    input_tensor = audio_data[np.newaxis, np.newaxis, :]
-    
-    outputs = session.run(None, {input_name: input_tensor})
-    output_tensor = outputs[0]
-    
+    # 流式推理
+    h = np.zeros((num_layers, 1, hidden_size), dtype=np.float32)
+    out = np.zeros_like(audio_data)
+    n = len(audio_data)
+    idx = 0
+    while idx < n:
+        end = min(idx + frame_size, n)
+        frame = audio_data[idx:end]
+        # pad 到固定长度
+        if len(frame) < frame_size:
+            pad = np.zeros(frame_size, dtype=np.float32)
+            pad[:len(frame)] = frame
+            frame = pad
+        inp = frame[np.newaxis, np.newaxis, :]
+        feed = {input_name: inp, h_name: h}
+        outputs = session.run(None, feed)
+        y = outputs[0][0,0,:len(frame)]
+        h = outputs[1]
+        out[idx:end] = y[:end-idx]
+        idx = end
+
     elapsed = time.time() - start_time
     rtf = elapsed / (len(audio_data) / 48000)
     print(f"  Time: {elapsed:.3f}s | RTF: {rtf:.3f}x")
-    
-    return output_tensor.squeeze()
+    return out
 
 def main():
     parser = argparse.ArgumentParser(description="DeepFilterGAN 音色修复离线推理工具")
     parser.add_argument("-m", "--model", type=str, required=True, help="ONNX 模型路径")
     parser.add_argument("-i", "--input", type=str, required=True, help="输入音频路径")
     parser.add_argument("-o", "--output", type=str, default=None, help="输出路径")
+    parser.add_argument("--frame-size", type=int, default=480, help="流式帧长")
+    parser.add_argument("--hidden-size", type=int, default=None, help="流式模型隐藏状态维度")
+    parser.add_argument("--num-layers", type=int, default=None, help="流式模型层数")
     args = parser.parse_args()
 
     if not os.path.exists(args.model):
