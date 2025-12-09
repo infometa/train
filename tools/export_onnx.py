@@ -283,12 +283,21 @@ def export_streaming_onnx(
     print(f"Note: Inference expects input + hidden state and returns updated hidden state.")
 
 
-def benchmark_onnx(onnx_path: str, frame_size: int = 480, num_iters: int = 1000):
-    """性能基准测试"""
+def benchmark_onnx(
+    onnx_path: str,
+    frame_size: int = 480,
+    num_iters: int = 1000,
+    include_state: bool = False,
+    num_layers: int = 1,
+    hidden_size: int = None,
+):
+    """性能基准测试（支持流式 hidden state）"""
     
     if not ORT_AVAILABLE:
         print("Skipping benchmark (onnxruntime not available)")
         return
+    if include_state and hidden_size is None:
+        raise RuntimeError("benchmark_onnx: include_state=True requires hidden_size")
     
     import time
     
@@ -301,13 +310,22 @@ def benchmark_onnx(onnx_path: str, frame_size: int = 480, num_iters: int = 1000)
     
     # 预热
     x = np.random.randn(1, 1, frame_size).astype(np.float32)
+    h0 = None
+    if include_state:
+        h0 = np.zeros((num_layers, 1, hidden_size), dtype=np.float32)
     for _ in range(10):
-        ort_session.run(None, {'input': x})
+        feed = {'input': x}
+        if include_state:
+            feed['h_in'] = h0
+        ort_session.run(None, feed)
     
     # 计时
     start = time.perf_counter()
     for _ in range(num_iters):
-        ort_session.run(None, {'input': x})
+        feed = {'input': x}
+        if include_state:
+            feed['h_in'] = h0
+        ort_session.run(None, feed)
     elapsed = time.perf_counter() - start
     
     avg_ms = (elapsed / num_iters) * 1000
@@ -353,13 +371,29 @@ def main():
         )
         include_state = False
     
+    # hidden state 规格（仅流式）
+    num_layers = None
+    hidden_size = None
+    if include_state:
+        if hasattr(model.bottleneck, "gru"):
+            num_layers = model.bottleneck.gru.num_layers
+            hidden_size = model.bottleneck.gru.hidden_size
+        elif hasattr(model.bottleneck, "lstm"):
+            num_layers = model.bottleneck.lstm.num_layers
+            hidden_size = model.bottleneck.lstm.hidden_size
+    
     # 验证
     if args.verify:
         verify_onnx(model, args.output, include_state=include_state)
     
     # 性能测试
     if args.benchmark:
-        benchmark_onnx(args.output)
+        benchmark_onnx(
+            args.output,
+            include_state=include_state,
+            num_layers=num_layers if include_state else 1,
+            hidden_size=hidden_size if include_state else None,
+        )
     
     print("\nDone!")
 
