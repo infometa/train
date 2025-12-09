@@ -11,6 +11,7 @@
 """
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
@@ -34,6 +35,8 @@ try:
 except ImportError:
     print("Warning: onnxruntime not found. Install with: pip install onnxruntime")
     ORT_AVAILABLE = False
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from model.generator import CausalUNetGenerator
 
