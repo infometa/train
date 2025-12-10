@@ -97,6 +97,48 @@ python export_onnx.py \
     --benchmark
 ```
 
+### 6. 推理（ONNX / PyTorch）
+
+- ONNX 非流式（一次性）：
+  ```bash
+  python tools/inference.py \
+    -m timbre_restore_ep74.onnx \
+    -i nc2.wav
+  ```
+
+- ONNX 流式（需传入隐藏状态规格）：
+  ```bash
+  python tools/inference.py \
+    -m timbre_restore_ep74.onnx \
+    -i nc2.wav \
+    --frame-size 480 \
+    --hidden-size 384 \
+    --num-layers 2
+  ```
+  - 如只有 CPU，可加 `OMP_NUM_THREADS=1 OMP_WAIT_POLICY=PASSIVE`。
+  - 模型有 `h_in/h_out` 即为流式导出。
+
+- PyTorch `.pt`：
+  ```bash
+  python tools/inference.py \
+    -m logs1209/20251208_063820/checkpoints/checkpoint_epoch_0074.pt \
+    -i nc2.wav \
+    --config configs/lightweight.yaml
+  ```
+
+流式导出（带隐藏状态）：
+```bash
+python tools/export_onnx.py \
+  --checkpoint logs1209/20251208_063820/checkpoints/checkpoint_epoch_0074.pt \
+  --config configs/lightweight.yaml \
+  --output timbre_restore_ep74.onnx \
+  --streaming \
+  --verify \
+  --benchmark
+# CPU 基准可结合线程控制
+# OMP_NUM_THREADS=4 OMP_WAIT_POLICY=PASSIVE ...
+```
+
 ### 5. 数据集快速自检（存在性 + 对齐 + SNR）
 
 ```bash

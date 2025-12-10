@@ -229,6 +229,7 @@ def main():
         frame_size=args.frame_size,
         hidden_size=args.hidden_size,
         num_layers=args.num_layers,
+        config_path=args.config,
     )
     if processed_audio is None: return
 
