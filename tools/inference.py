@@ -151,52 +151,6 @@ def run_inference(model_path, audio_data, frame_size=480, hidden_size=None, num_
     rtf = elapsed / (len(audio_data) / 48000)
     print(f"  Time: {elapsed:.3f}s | RTF: {rtf:.3f}x")
     return y
-            return None
-        input_name = 'input'
-        h_name = 'h_in'
-    else:
-        input_name = inputs[0].name
-        h_name = None
-    
-    print(f"Running inference on {model_path}... (streaming={has_state})")
-    start_time = time.time()
-
-    if not has_state:
-        if len(audio_data) > 48000 * 30:
-            print("⚠️ 警告：音频过长 (>30s)，一次性推理可能耗尽内存。建议使用流式模型或切片处理。")
-        input_tensor = audio_data[np.newaxis, np.newaxis, :]
-        outputs = session.run(None, {input_name: input_tensor})
-        output_tensor = outputs[0].squeeze()
-        elapsed = time.time() - start_time
-        rtf = elapsed / (len(audio_data) / 48000)
-        print(f"  Time: {elapsed:.3f}s | RTF: {rtf:.3f}x")
-        return output_tensor
-
-    # 流式推理
-    h = np.zeros((num_layers, 1, hidden_size), dtype=np.float32)
-    out = np.zeros_like(audio_data)
-    n = len(audio_data)
-    idx = 0
-    while idx < n:
-        end = min(idx + frame_size, n)
-        frame = audio_data[idx:end]
-        # pad 到固定长度
-        if len(frame) < frame_size:
-            pad = np.zeros(frame_size, dtype=np.float32)
-            pad[:len(frame)] = frame
-            frame = pad
-        inp = frame[np.newaxis, np.newaxis, :]
-        feed = {input_name: inp, h_name: h}
-        outputs = session.run(None, feed)
-        y = outputs[0][0,0,:len(frame)]
-        h = outputs[1]
-        out[idx:end] = y[:end-idx]
-        idx = end
-
-    elapsed = time.time() - start_time
-    rtf = elapsed / (len(audio_data) / 48000)
-    print(f"  Time: {elapsed:.3f}s | RTF: {rtf:.3f}x")
-    return out
 
 def main():
     parser = argparse.ArgumentParser(description="DeepFilterGAN 音色修复离线推理工具")
