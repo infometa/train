@@ -1,28 +1,27 @@
 # ===========================================
-# 轻量化均衡版配置 (Lightweight Plus / Balanced)
-# 目标: 兼顾实时性 (RTF < 0.8) 与高音质
-# 改进: 相比 Lite 版增加了通道和层数，大幅提升高频还原能力
+# 轻量化激进高频版配置 (Lightweight Extreme HF)
+# 基于 lightweight.yaml 的最新基础配置，强化高频与对抗
 # ===========================================
 
 data:
-  # 路径配置
+  # 路径配置（与基础版一致）
   vctk_path: "/data/audio/vctk/wav48_silence_trimmed"
   aishell3_path: "/data/audio/Aishell3/train/wav"
   ir_path: "/data/audio/impulse_responses/SLR26/simulated_rirs_48k"
   noise_path: "/data/audio/freesound/datasets_fullband/noise_fullband"
   
-  # === 使用 SNR 过滤后的数据集 ===
+  # 使用过滤后数据集
   output_dir: "/data/train_data_snr"
 
   sample_rate: 48000
-  segment_length: 24000       # 0.5 秒训练段
-  save_segment_length: 48000  # 保存 1 秒
+  segment_length: 24000
+  save_segment_length: 48000
   segment_hop: 24000
   
-  # === 高质量修复策略（更激进，压高频） ===
-  snr_range: [18, 30]     # 提高下限，过滤低 SNR
-  noise_prob: 0.7         # 增加纯净比例，保障低频/能量
-  ir_prob: 0.35           # 减少混响扰动，避免掩盖高频
+  # 更激进的高质量策略
+  snr_range: [18, 30]    # 提高下限，过滤低 SNR
+  noise_prob: 0.7        # 增加纯净样本比例，保障低频能量
+  ir_prob: 0.35          # 减少混响扰动，避免掩盖高频
 
   dataset_ratio:
     vctk: 0.3
@@ -30,79 +29,67 @@ data:
 
   val_ratio: 0.05
   
-  # === 必须关闭二次对齐 (数据已物理对齐) ===
   align_df_delay: false
   align_max_shift: 4000
   align_sample_count: 32
   
-  # === 高性能加载 ===
   num_workers: 8
 
 model:
   name: "CausalUNetGAN_Balanced"
   
-  # Generator (U-Net) - 均衡增强版
   generator:
     in_channels: 1
     out_channels: 1
-    # [升级 1] 通道扩容: 32 -> 48 (增加 50% 容量，提升细节记忆)
     channels: [48, 96, 192, 384]
-    # [升级 2] 恢复大卷积: 5 -> 7 (提升感受野，改善低频连贯性)
     kernel_size: 7
     bottleneck_type: "gru"
-    # [升级 3] 恢复双层 GRU: 1 -> 2 (消除时序涂抹感)
     bottleneck_layers: 2
     use_weight_norm: true
     
-  # Discriminator (Multi-Scale) - 配套增强
   discriminator:
     scales: 2
-    # [升级] 判别器通道对应增加，保持对抗强度
+    periods: [2, 3, 5, 7, 11]
     channels: [48, 96, 192, 384, 768]
     kernel_size: 5
     use_spectral_norm: true
 
 training:
-  # [调整] 模型变大，Batch Size 微调以防爆显存 (32 -> 24)
   batch_size: 24
-  epochs: 120
-
-  # 优化器 (保持防崩盘设置)
+  epochs: 80
+  
   optimizer:
     type: "AdamW"
-    lr_g: 5.0e-5       # 低学习率求稳
+    lr_g: 5.0e-5
     lr_d: 5.0e-5
     betas: [0.8, 0.99]
     weight_decay: 0.01
   
   scheduler:
     type: "CosineAnnealingLR"
-    T_max: 120
+    T_max: 80
     eta_min: 1.0e-6
-    warmup_epochs: 12
-
+    warmup_epochs: 10
+  
   loss_weights:
-    l1: 0.5
-    multi_stft: 6.0
-    adversarial: 3.0
+    l1: 1.0           # 适度提高，保留能量/相位
+    multi_stft: 5.5   # 频域更强
+    adversarial: 2.0  # 中高对抗力度
     feature_matching: 2.5
-
+  
   stft_config:
     fft_sizes: [512, 1024, 2048]
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    # 高频权重：极端高频恢复
-    hf_weight: 7.0
-    hf_cutoff: 2500
-
-  # 策略
-  gan_start_epoch: 8
-  # [关键] 强力梯度裁剪，防止 NaN
+    hf_weight: 5.0     # 强但相对稳健
+    hf_cutoff: 3000
+  
+  gan_start_epoch: 10
   grad_clip: 0.1
   
   save_every: 5
-  log_every: 500
+  log_every: 400
 
 inference:
   onnx_opset: 17
@@ -117,4 +104,4 @@ distributed:
 logging:
   tensorboard: true
   wandb: false
-  project_name: "timbre_restore_balanced"
+  project_name: "timbre_restore_extreme_hf"
