@@ -19,10 +19,10 @@ data:
   save_segment_length: 48000  # 保存 1 秒
   segment_hop: 24000
   
-  # === 高质量修复策略 ===
-  snr_range: [15, 30]     # 提升下限，聚焦中高 SNR 场景
-  noise_prob: 0.8         # 提高纯净样本占比，强化恒等映射
-  ir_prob: 0.4            # 略降混响比例，减少过度去混响风险
+  # === 高质量修复策略（更激进，压高频） ===
+  snr_range: [18, 30]     # 提高下限，过滤低 SNR
+  noise_prob: 0.7         # 增加纯净比例，保障低频/能量
+  ir_prob: 0.35           # 减少混响扰动，避免掩盖高频
 
   dataset_ratio:
     vctk: 0.3
@@ -65,8 +65,8 @@ model:
 training:
   # [调整] 模型变大，Batch Size 微调以防爆显存 (32 -> 24)
   batch_size: 24
-  epochs: 90
-  
+  epochs: 120
+
   # 优化器 (保持防崩盘设置)
   optimizer:
     type: "AdamW"
@@ -77,27 +77,27 @@ training:
   
   scheduler:
     type: "CosineAnnealingLR"
-    T_max: 90
+    T_max: 120
     eta_min: 1.0e-6
-    warmup_epochs: 8
-  
+    warmup_epochs: 12
+
   loss_weights:
-    l1: 3.0
-    multi_stft: 3.0
-    adversarial: 1.0
-    feature_matching: 2.0
-  
+    l1: 0.5
+    multi_stft: 6.0
+    adversarial: 3.0
+    feature_matching: 2.5
+
   stft_config:
     fft_sizes: [512, 1024, 2048]
     hop_sizes: [128, 256, 512]
     win_lengths: [512, 1024, 2048]
     sample_rate: 48000
-    # 高频权重：适度降低以提升稳定性，避免振铃
-    hf_weight: 3.0
-    hf_cutoff: 3000
-  
+    # 高频权重：极端高频恢复
+    hf_weight: 7.0
+    hf_cutoff: 2500
+
   # 策略
-  gan_start_epoch: 10
+  gan_start_epoch: 8
   # [关键] 强力梯度裁剪，防止 NaN
   grad_clip: 0.1
   
